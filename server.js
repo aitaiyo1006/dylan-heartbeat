@@ -594,8 +594,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
     normalizeContentToText(msg.content).includes("判断其中是否包含值得长期记忆的用户信息")
 );
 
+const isBackgroundMemoryRequest = kelivoMessages.some(
+  msg =>
+    msg.role === "user" &&
+    (
+      normalizeContentToText(msg.content).includes("从对话中提取用户画像的新信息") ||
+      normalizeContentToText(msg.content).includes("I will give you user messages from a conversation in") ||
+      normalizeContentToText(msg.content).includes("判断其中是否包含值得长期记忆的用户信息")
+    )
+);
+
 const finalTimeline = buildTimeline(kelivoMessages, tsDB);
-if (!isMemoryRequest) saveTimeline(finalTimeline);
+
+if (!isBackgroundMemoryRequest) {
+  saveTimeline(finalTimeline);
+}
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
     // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
