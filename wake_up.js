@@ -442,16 +442,40 @@ async function runWakeUp() {
       return `[${role}] ${content}`;
     })
     .join("\n\n");
+.join("\n\n");
 
-  const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-  const cleanSP = baseSystemPrompt 
-    ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
-    : "";
+const wakeMemory = (() => {
+  const memoryMessage = [...cleanMessages]
+    .reverse()
+    .find(msg => {
+      const content = normalizeContentToText(msg.content);
+      return content.includes("<user_memory");
+    });
 
+  if (!memoryMessage) return "";
+
+  const content = normalizeContentToText(memoryMessage.content);
+
+  const match = content.match(
+    /<user_memory type="identity"[\s\S]*?<\/user_memory>/
+  );
+
+  if (!match) return "";
+
+  return `【长期记忆】\n${match[0]}`;
+})();
+
+const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
+
+const cleanSP = baseSystemPrompt
+  ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
+  : "";
   const wakeMessages = [
     {
       role: "system",
-      content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
+      content: [wakePrompt, cleanSP, wakeMemory]
+  .filter(Boolean)
+  .join("\n\n")
     },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
