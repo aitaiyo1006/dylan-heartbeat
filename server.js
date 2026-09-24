@@ -588,8 +588,14 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
     if (tsDBDirty) saveTimestampDB(tsDB);
 
-    const finalTimeline = buildTimeline(kelivoMessages, tsDB);
-    saveTimeline(finalTimeline);
+    const isMemoryRequest = kelivoMessages.some(
+  msg =>
+    msg.role === "user" &&
+    normalizeContentToText(msg.content).includes("判断其中是否包含值得长期记忆的用户信息")
+);
+
+const finalTimeline = buildTimeline(kelivoMessages, tsDB);
+if (!isMemoryRequest) saveTimeline(finalTimeline);
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
     // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
