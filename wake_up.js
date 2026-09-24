@@ -442,7 +442,7 @@ async function runWakeUp() {
       return `[${role}] ${content}`;
     })
     .join("\n\n");
-.join("\n\n");
+
 
 const wakeMemory = (() => {
   const memoryMessage = [...cleanMessages]
