@@ -561,11 +561,15 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 批注 2026-07-15：公开部署时日志不能默认写入完整上下文；
     // 这里只保留请求摘要，避免 system prompt、记忆和聊天正文进入 pm2 日志。
     console.log(JSON.stringify({
-      event: "kelivo_request",
-      model: body?.model || "",
-      stream: body?.stream === true,
-      messages: summarizeMessagesForLog(body?.messages || [])
-    }));
+  event: "kelivo_request",
+  model: body?.model || "",
+  stream: body?.stream === true,
+
+  message_count: body?.messages?.length || 0,
+
+  last_message:
+    body?.messages?.[body.messages.length - 1]?.content || ""
+}));
 
     const kelivoMessages = body.messages || [];
     const oldTimeline = loadTimeline();
