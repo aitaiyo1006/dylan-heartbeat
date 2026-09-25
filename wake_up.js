@@ -357,50 +357,7 @@ function getLastUserTime(messages) {
 function stripPosition(messages) {
   return messages.map(({ position, ...rest }) => rest);
 }
-function buildWakeDecisionMessages(recentMessages, currentTime, diffMinutes) {
-  const userDisplay = process.env.USER_DISPLAY_NAME || "用户";
-  const aiDisplay = process.env.AI_DISPLAY_NAME || "AI";
 
-  const recentText = recentMessages
-    .filter(msg => msg.role !== "system")
-    .map(msg => {
-      const role = msg.role === "user" ? userDisplay : aiDisplay;
-      const content = normalizeContentToText(msg.content);
-      return `[${role}] ${content}`;
-    })
-    .join("\n\n");
-
-  return [
-    {
-      role: "system",
-      content: `你现在处于后台自动唤醒判断阶段。
-
-你的唯一任务是判断：现在是否值得主动联系用户。
-这不是正在发生的对话，用户没有发送新消息。
-不要生成要发送给用户的内容。
-不要写日记。
-不要索取更多上下文。
-
-当前时间：${currentTime}
-距离用户最后一条消息：${diffMinutes} 分钟
-
-请只根据下面最近最多30条聊天记录判断。
-如果你认为现在应该进入第二阶段、读取完整上下文并生成实际主动消息，只输出：
-WAKE
-
-如果你认为现在没有必要联系用户，只输出：
-NO_WAKE
-
-除这两个词外不要输出任何内容。`
-    },
-    {
-      role: "user",
-      content: `以下是最近最多30条聊天记录，仅用于决定是否需要唤醒：
-
-${recentText}`
-    }
-  ];
-}
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   // 优先读取独立的提示词文件（推荐方式）
   const promptFile = path.join(__dirname, "wake_prompt.txt");
@@ -464,106 +421,10 @@ async function runWakeUp() {
     return;
   }
 
-    // ============================================================
-  // 第一阶段：只使用最近最多30条聊天记录判断是否需要唤醒
-  // ============================================================
-
+  const weatherContext = await fetchWeatherContext();
+  const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext);
   const cleanMessages = stripPosition(messages);
 
-  const recentWakeMessages = cleanMessages
-    .filter(msg => msg.role !== "system")
-    .slice(-30);
-
-  const decisionMessages = buildWakeDecisionMessages(
-    recentWakeMessages,
-    getChinaTimeString(),
-    diffMinutes
-  );
-
-  if (!process.env.TARGET_API_URL || !process.env.TARGET_API_KEY || !process.env.MODEL_NAME) {
-    console.log("缺少 TARGET_API_URL / TARGET_API_KEY / MODEL_NAME，跳过本次唤醒");
-    return;
-  }
-
-  console.log("\n===== WAKE DECISION SUMMARY =====\n");
-  console.log(JSON.stringify(summarizeWakeMessages(decisionMessages)));
-
-  let decisionResponse;
-
-  try {
-    decisionResponse = await fetch(process.env.TARGET_API_URL, {
-      method: "POST",
-      signal: AbortSignal.timeout(WAKE_UPSTREAM_TIMEOUT_MS),
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.TARGET_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: process.env.MODEL_NAME,
-        messages: decisionMessages,
-        temperature: 0,
-        top_p: 1,
-        max_tokens: 5,
-        stream: false
-      })
-    });
-  } catch (error) {
-    throw new Error(`唤醒判断请求失败：${error.message}`);
-  }
-
-  const decisionResponseText = await decisionResponse.text();
-
-  let decisionData;
-
-  try {
-    decisionData = parseChatCompletionResponse(
-      decisionResponseText,
-      decisionResponse.headers.get("content-type") || ""
-    );
-  } catch (error) {
-    throw new Error(
-      `唤醒判断响应无法解析（HTTP ${decisionResponse.status}）：${error.message || decisionResponseText.slice(0, 300)}`
-    );
-  }
-
-  if (!decisionResponse.ok) {
-    throw new Error(
-      `唤醒判断请求失败（HTTP ${decisionResponse.status}）：${decisionResponseText.slice(0, 300)}`
-    );
-  }
-
-  const wakeDecision = normalizeContentToText(
-    decisionData.choices?.[0]?.message?.content
-  ).trim().toUpperCase();
-
-  console.log(
-    "\nWake Decision Result:\n",
-    JSON.stringify({
-      decision: wakeDecision,
-      recent_records: recentWakeMessages.length
-    })
-  );
-
-  // 第一阶段如果判断为 NO_WAKE：
-  // 不读取完整历史、不读取长期记忆、不生成 Bark。
-  if (!/^WAKE$/.test(wakeDecision)) {
-    console.log(
-      "\n第一阶段判断为 NO_WAKE，不读取完整唤醒上下文，不发送推送\n"
-    );
-    return;
-  }
-
-  // ============================================================
-  // 第二阶段：只有 WAKE 才继续使用原来的完整上下文
-  // ============================================================
-
-  const weatherContext = await fetchWeatherContext();
-
-  const wakePrompt = buildWakePrompt(
-    getChinaTimeString(),
-    diffMinutes,
-    weatherContext
-  );
   const historyText = cleanMessages
     .filter(msg => msg.role !== "system")
     .filter(msg => {
@@ -582,39 +443,15 @@ async function runWakeUp() {
     })
     .join("\n\n");
 
+  const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
+  const cleanSP = baseSystemPrompt 
+    ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
+    : "";
 
-const wakeMemory = (() => {
-  const memoryMessage = [...cleanMessages]
-    .reverse()
-    .find(msg => {
-      const content = normalizeContentToText(msg.content);
-      return content.includes("<user_memory");
-    });
-
-  if (!memoryMessage) return "";
-
-  const content = normalizeContentToText(memoryMessage.content);
-
-  const match = content.match(
-    /<user_memory type="identity"[\s\S]*?<\/user_memory>/
-  );
-
-  if (!match) return "";
-
-  return `【长期记忆】\n${match[0]}`;
-})();
-
-const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-
-const cleanSP = baseSystemPrompt
-  ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
-  : "";
   const wakeMessages = [
     {
       role: "system",
-      content: [wakePrompt, cleanSP, wakeMemory]
-  .filter(Boolean)
-  .join("\n\n")
+      content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
     },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
