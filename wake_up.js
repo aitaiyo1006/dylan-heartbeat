@@ -530,12 +530,14 @@ ${historyText}`
     // AI 选择不发送推送
     console.log("\nAI 选择不发送推送\n");
     let reason = (noActionMatch[1] || "").trim();
-    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-      reason = reason.replace(/^原因[：:]\s*/, "").trim();
-    }
-    eventContent = reason
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+
+if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+  reason = reason.replace(/^原因[:：]\s*/, "").trim();
+}
+
+console.log("AI选择不发送推送，原因：", reason);
+
+eventContent = "";
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
@@ -574,7 +576,7 @@ ${historyText}`
       body = lines.slice(1).map(l => l.trim()).join(" ");
     }
 
-    if (!eventContent) {
+    if (eventContent) {
       // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
       const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
       // 若标题为空或以数字开头，加个前缀，可自行修改
@@ -590,7 +592,9 @@ ${historyText}`
       }
     }
   }
-
+if (!eventContent) {
+  return;
+}
   try {
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
