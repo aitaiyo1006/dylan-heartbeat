@@ -561,15 +561,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 批注 2026-07-15：公开部署时日志不能默认写入完整上下文；
     // 这里只保留请求摘要，避免 system prompt、记忆和聊天正文进入 pm2 日志。
     console.log(JSON.stringify({
-  event: "kelivo_request",
-  model: body?.model || "",
-  stream: body?.stream === true,
-
-  message_count: body?.messages?.length || 0,
-
-  last_message:
-    body?.messages?.[body.messages.length - 1]?.content || ""
-}));
+      event: "kelivo_request",
+      model: body?.model || "",
+      stream: body?.stream === true,
+      messages: summarizeMessagesForLog(body?.messages || [])
+    }));
 
     const kelivoMessages = body.messages || [];
     const oldTimeline = loadTimeline();
@@ -588,27 +584,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
     if (tsDBDirty) saveTimestampDB(tsDB);
 
-    const isMemoryRequest = kelivoMessages.some(
-  msg =>
-    msg.role === "user" &&
-    normalizeContentToText(msg.content).includes("判断其中是否包含值得长期记忆的用户信息")
-);
-
-const isBackgroundMemoryRequest = kelivoMessages.some(
-  msg =>
-    msg.role === "user" &&
-    (
-      normalizeContentToText(msg.content).includes("从对话中提取用户画像的新信息") ||
-      normalizeContentToText(msg.content).includes("I will give you user messages from a conversation in") ||
-      normalizeContentToText(msg.content).includes("判断其中是否包含值得长期记忆的用户信息")
-    )
-);
-
-const finalTimeline = buildTimeline(kelivoMessages, tsDB);
-
-if (!isBackgroundMemoryRequest) {
-  saveTimeline(finalTimeline);
-}
+    const finalTimeline = buildTimeline(kelivoMessages, tsDB);
+    saveTimeline(finalTimeline);
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
     // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
