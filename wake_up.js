@@ -547,7 +547,7 @@ console.log("\nAI 选择不发送推送\n");
 let reason = (noActionMatch[1] || "").trim();
 
 console.log("AI不发送原因:", reason);
-    
+    }
     eventContent = reason
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
