@@ -594,13 +594,16 @@ app.post("/v1/chat/completions", async (req, reply) => {
       .filter(Boolean);
 
     const oldEvents = stripPosition(
-      oldTimeline.filter(isSpecialEvent).sort((a, b) => {
-        const timeA = extractTimestampWithMemory(a, tsDB);
-        const timeB = extractTimestampWithMemory(b, tsDB);
-        if (timeA && timeB) return timeA - timeB;
-        return 0;
-      })
-    );
+  oldTimeline
+    .filter(isSpecialEvent)
+    .sort((a, b) => {
+      const timeA = extractTimestampWithMemory(a, tsDB);
+      const timeB = extractTimestampWithMemory(b, tsDB);
+      if (timeA && timeB) return timeB - timeA;
+      return 0;
+    })
+    .slice(0, 6)
+);
 
     console.log("本次注入的特殊事件数量:", oldEvents.length);
 
