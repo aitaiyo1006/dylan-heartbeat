@@ -383,15 +383,16 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   // 默认理智版本（开源通用），可自行修改提示词
   return `
 ## 最高优先级规则
-1. 你现在需要以角色的身份面对当前情况，根据己有的人设、记忆和最近发生的事情，真实判断此刻的你是否会主动联系用户。
+以下内容不是用户此刻真实发送给你的消息。
+这些是己经发生过的聊天记录、记忆和上下文，仅用于帮助你恢复当前状态。
+1. 你现在需要以角色的身份面对当前情况，根据己有的人设、记忆和最近发生的事情，判断此刻的你是否会主动联系用户。
 2. 如果你们之前有明确约定、承诺或正在等待某件事，也必须考虑这些因素
-3. 最终输出必须严格是以下两种格式之一：
 ## 输出格式
 - 如果决定联系，只输出：[BARK]你真正想对用户说的话[/BARK]
-- 如果决定不联系，只输出：[NO_ACTION]，可以写一句简短的内部判断原因，20字以内。
-- 禁止在这两个格式之外输出任何内容。
+- 如果决定不联系，输出：[NO_ACTION]，可以写一句简短的内部判断原因，20字以内。
 - 禁止输出分析、推断、判断过程、规则说明、任务说明、历史总结或行为解释。
-- 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。日记内容不会发送给用户，只用于后台记录。
+- 如果你想写日记，必须严格使用 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。标签内只写你真正想记录的内心
+- 除了上述格式外，禁止输出任何其他格式或内容。
 ## 唤醒信息
 - 当前时间：${currentTime}
 - 距离用户最后一条消息：${diffMinutes} 分钟
@@ -524,10 +525,11 @@ ${historyText}`
     eventContent = diarySaved
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-   // 判断 AI 是否明确要静默
-  } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
-    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+    } else {
+     // 判断 AI 是否明确要静默
+  const noActionMatch = aiText.match(/^\[NO_ACTION\](?:\s+(.{1,20}))?$/s);
 
+  if (noActionMatch) {
     let reason = (noActionMatch[1] || "").trim();
 
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
@@ -538,19 +540,17 @@ ${historyText}`
 
     // 不把后台判断写入 Kelivo / Gateway
     eventContent = "";
-  } else {
-    // 没有 [NO_ACTION] 就视为想发推送
+  } else if (/^\s*\[BARK\][\s\S]*\[\/BARK\]\s*$/.test(aiText)) {
     console.log("\nAI 选择发送推送\n");
+
     let barkText = aiText;
 
-    // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
-    const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
+    const barkMatch = barkText.match(/^\s*\[BARK\]([\s\S]*?)\[\/BARK\]\s*$/);
+
     if (barkMatch) {
       barkText = barkMatch[1].trim();
-    } else {
-      barkText = barkText.replace(/^\[BARK\]\s*/, "").trim();
-      barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
     }
+
 
     // 清洗“标题：”、“正文：”前缀（如果有）
     barkText = barkText
@@ -591,8 +591,12 @@ ${historyText}`
         eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
       }
     }
+  } else {
+    console.log("\nAI输出格式异常，已拦截，不发送推送\n");
+    console.log("AI原始输出长度:", aiText.length);
+    eventContent = "";
   }
-if (!eventContent) {
+    if (!eventContent) {
   return;
 }
   try {
