@@ -520,81 +520,116 @@ ${historyText}`
 
   let eventContent;
 
-  if (!aiText) {
+   if (!aiText) {
     console.log("\nAI 未返回推送内容，本次不发送推送\n");
     eventContent = diarySaved
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-    } else {
-     // 判断 AI 是否明确要静默
-  const noActionMatch = aiText.match(/^\[NO_ACTION\](?:\s+(.{1,20}))?$/s);
 
-  if (noActionMatch) {
-    let reason = (noActionMatch[1] || "").trim();
-
-    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-      reason = reason.replace(/^原因[:：]\s*/, "").trim();
-    }
-
-    console.log("AI选择不发送推送，原因：", reason || "未提供原因");
-
-    // 不把后台判断写入 Kelivo / Gateway
-    eventContent = "";
-  } else if (/^\s*\[BARK\][\s\S]*\[\/BARK\]\s*$/.test(aiText)) {
-    console.log("\nAI 选择发送推送\n");
-
-    let barkText = aiText;
-
-    const barkMatch = barkText.match(/^\s*\[BARK\]([\s\S]*?)\[\/BARK\]\s*$/);
-
-    if (barkMatch) {
-      barkText = barkMatch[1].trim();
-    }
-
-
-    // 清洗“标题：”、“正文：”前缀（如果有）
-    barkText = barkText
-      .replace(/^标题[：:]\s*/gm, "")
-      .replace(/^正文[：:]\s*/gm, "");
-
-    // 按行处理
-    const lines = barkText.split("\n").filter(line => line.trim() !== "");
-
-    let title, body;
-    if (lines.length === 0) {
-      console.log("\n推送内容清洗后为空，本次不发送推送\n");
-      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
-    } else if (lines.length === 1) {
-      title = "来自AI";
-      body = lines[0].trim();
-    } else if (lines.length === 2) {
-      title = lines[0].trim();
-      body = lines[1].trim();
-    } else {
-      // ≥3 行：第一行标题，剩余用空格拼接成正文
-      title = lines[0].trim();
-      body = lines.slice(1).map(l => l.trim()).join(" ");
-    }
-
-    if (eventContent) {
-      // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
-      const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
-      // 若标题为空或以数字开头，加个前缀，可自行修改
-      let safeTitle = title || "来自伴侣";
-      if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
-
-      const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
-      if (!pushResult.ok) {
-        console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
-        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
-      } else {
-        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
-      }
-    }
   } else {
-    console.log("\nAI输出格式异常，已拦截，不发送推送\n");
-    console.log("AI原始输出长度:", aiText.length);
-    eventContent = "";
+    // 判断 AI 是否明确要静默
+    const noActionMatch = aiText.match(
+      /^\[NO_ACTION\](?:\s+(.{1,20}))?$/s
+    );
+
+    if (noActionMatch) {
+      let reason = (noActionMatch[1] || "").trim();
+
+      if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+        reason = reason.replace(/^原因[:：]\s*/, "").trim();
+      }
+
+      console.log(
+        "AI选择不发送推送，原因：",
+        reason || "未提供原因"
+      );
+
+      // 不把后台判断写入 Kelivo / Gateway
+      eventContent = "";
+
+    } else if (
+      /^\s*\[BARK\][\s\S]*\[\/BARK\]\s*$/.test(aiText)
+    ) {
+      console.log("\nAI 选择发送推送\n");
+
+      let barkText = aiText;
+
+      const barkMatch = barkText.match(
+        /^\s*\[BARK\]([\s\S]*?)\[\/BARK\]\s*$/
+      );
+
+      if (barkMatch) {
+        barkText = barkMatch[1].trim();
+      }
+
+      // 清洗“标题：”、“正文：”前缀（如果有）
+      barkText = barkText
+        .replace(/^标题[：:]\s*/gm, "")
+        .replace(/^正文[：:]\s*/gm, "");
+
+      // 按行处理
+      const lines = barkText
+        .split("\n")
+        .filter(line => line.trim() !== "");
+
+      let title, body;
+
+      if (lines.length === 0) {
+        console.log("\n推送内容清洗后为空，本次不发送推送\n");
+        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
+
+      } else if (lines.length === 1) {
+        title = "来自AI";
+        body = lines[0].trim();
+
+      } else if (lines.length === 2) {
+        title = lines[0].trim();
+        body = lines[1].trim();
+
+      } else {
+        // ≥3 行：第一行标题，剩余用空格拼接成正文
+        title = lines[0].trim();
+        body = lines.slice(1).map(l => l.trim()).join(" ");
+      }
+
+      if (!eventContent) {
+        // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示
+        const safeBody =
+          body.length > 500
+            ? body.substring(0, 497) + "..."
+            : body;
+
+        // 若标题为空或以数字开头，加个前缀
+        let safeTitle = title || "来自伴侣";
+        if (/^\d/.test(safeTitle)) {
+          safeTitle = "来自伴侣｜" + safeTitle;
+        }
+
+        const pushResult = await sendPushNotification({
+          title: safeTitle,
+          body: safeBody
+        });
+
+        if (!pushResult.ok) {
+          console.log(
+            `\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`
+          );
+
+          eventContent =
+            `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
+
+        } else {
+          eventContent =
+            `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+        }
+      }
+
+    } else {
+      // AI 输出不是合法的 NO_ACTION 或 BARK，直接拦截
+      console.log("\nAI输出格式异常，已拦截，不发送推送\n");
+      console.log("AI原始输出长度:", aiText.length);
+      eventContent = "";
+    }
   }
     if (!eventContent) {
   return;
