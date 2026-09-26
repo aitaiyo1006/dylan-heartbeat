@@ -593,25 +593,24 @@ app.post("/v1/chat/completions", async (req, reply) => {
       .map(prepareMessageForLLM)
       .filter(Boolean);
 
-    const oldEvents = stripPosition(
-  oldTimeline
-    .filter(isSpecialEvent)
-    .sort((a, b) => {
-      const timeA = extractTimestampWithMemory(a, tsDB);
-      const timeB = extractTimestampWithMemory(b, tsDB);
-      if (timeA && timeB) return timeB - timeA;
-      return 0;
-    })
-    .slice(0, 6)
-);
+    const MAX_INJECTED_SPECIAL_EVENTS = Number(process.env.MAX_INJECTED_SPECIAL_EVENTS) || 12;
+
+const oldEvents = stripPosition(
+  oldTimeline.filter(isSpecialEvent).sort((a, b) => {
+    const timeA = extractTimestampWithMemory(a, tsDB);
+    const timeB = extractTimestampWithMemory(b, tsDB);
+    if (timeA && timeB) return timeA - timeB;
+    return 0;
+  })
+).slice(-MAX_INJECTED_SPECIAL_EVENTS);
 
     console.log("本次注入的特殊事件数量:", oldEvents.length);
 
-    for (const event of oldEvents) {
+       for (const event of oldEvents) {
       const eventTime = extractTimestampWithMemory(event, tsDB);
-      if (!eventTime) { llmMessages.push(event); continue; }
+      if (!eventTime) { llmMessages.splice(llmMessages.length - 1, 0, event); continue; }
       let inserted = false;
-      for (let i = 0; i < llmMessages.length; i++) {
+      for (let i = 0; i < llmMessages.length - 1; i++) {
         const msgTime = extractTimestampWithMemory(llmMessages[i], tsDB);
         if (msgTime && msgTime >= eventTime) {
           llmMessages.splice(i, 0, event);
@@ -619,7 +618,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           break;
         }
       }
-      if (!inserted) llmMessages.push(event);
+      if (!inserted) llmMessages.splice(llmMessages.length - 1, 0, event);
     }
 
 
