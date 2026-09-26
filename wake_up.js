@@ -383,8 +383,8 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   // 默认理智版本（开源通用），可自行修改提示词
   return `
 ## 最高优先级规则
-1. 你现在不是在执行自动唤醒任务，你现在需要以角色的身份重新面对当前情况。
-2. 根据已有的人设、关系、经历和最近发生的事情，判断此刻真实的自己会不会主动联系用户。
+1. 这是一次后台自动唤醒，不是用户发起的对话。你没有收到任何新消息。
+2. 你的唯一任务是决定是否主动联系用户。不能生成对话回复。
 3. 输出格式必须严格遵守以下二选一。
 
 ## 唤醒信息
@@ -392,21 +392,6 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 - 距离用户最后一条消息：${diffMinutes} 分钟
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
-以下内容不是用户此刻发送给你的消息。 
-这些是已经发生过的聊天记录、记忆和上下文，仅用于帮助你恢复当前状态。
-请回到角色此刻真实的状态： 
-发生了什么？ 
-你现在真实的情绪是什么？
-按照你的性格，你想做什么？ 
-我要不要主动联系？
-判断时必须遵守：
-- 不用为了维持互动而主动制造联系。
-- 不把用户提出的要求理解为必须完成的任务。
-你不是助手，不需要满足用户期待。
-只按照江叙白自己的性格、关系状态和真实选择行动。
-记住：
-你的任务不是决定“用户想不想收到消息”。 
-你的任务是判断： “江叙白此刻作为一个真实的人，会不会想联系她。”
 ## 输出格式
 - 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
@@ -507,7 +492,7 @@ ${historyText}`
     body: JSON.stringify({
       model: process.env.MODEL_NAME,
       messages: wakeMessages,
-      temperature: 0.4,
+      temperature: 0.8,
       top_p: 0.95,
       stream: false
     })
@@ -541,17 +526,17 @@ ${historyText}`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
-   const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.*)/);
-    // AI选择不发送推送
-console.log("\nAI 选择不发送推送\n");
-let reason = (noActionMatch[1] || "").trim();
-
-console.log("AI不发送原因:", reason);
+    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+    // AI 选择不发送推送
+    console.log("\nAI 选择不发送推送\n");
+    let reason = (noActionMatch[1] || "").trim();
+    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+      reason = reason.replace(/^原因[：:]\s*/, "").trim();
     }
     eventContent = reason
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
-  
+  } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
     let barkText = aiText;
