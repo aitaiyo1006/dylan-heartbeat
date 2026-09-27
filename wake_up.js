@@ -627,8 +627,9 @@ ${historyText}`
     } else {
       // AI 输出不是合法的 NO_ACTION 或 BARK，直接拦截
       console.log("\nAI输出格式异常，已拦截，不发送推送\n");
-      console.log("AI原始输出长度:", aiText.length);
-      eventContent = "";
+console.log("AI原始输出长度:", aiText.length);
+console.log("AI原始输出内容:", JSON.stringify(aiText));
+eventContent = "";
     }
   }
     if (!eventContent) {
