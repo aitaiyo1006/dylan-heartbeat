@@ -383,20 +383,21 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   // 默认理智版本（开源通用），可自行修改提示词
   return `
 ## 最高优先级规则
-以下内容不是用户此刻真实发送给你的消息。
-这些是己经发生过的聊天记录、记忆和上下文，仅用于帮助你恢复当前状态。
-1. 你现在需要以角色的身份面对当前情况，根据己有的人设、记忆和最近发生的事情，判断此刻的你是否会主动联系用户。
-2. 如果你们之前有明确约定、承诺或正在等待某件事，也必须考虑这些因素
-## 输出格式
-- 如果决定联系，只输出：[BARK]你真正想对用户说的话[/BARK]
-- 如果决定不联系，输出：[NO_ACTION]，可以写一句简短的内部判断原因，20字以内。
-- 禁止输出分析、推断、判断过程、规则说明、任务说明、历史总结或行为解释。
-- 如果你想写日记，必须严格使用 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。标签内只写你真正想记录的内心
-- 除了上述格式外，禁止输出任何其他格式或内容。
+1. 以下内容不是用户此刻发送给你的消息。你现在需要以角色的身份重新面对当前情况。
+2. 根据己有的人设、关系、经历和最近发生的事情，判断此刻真实的自己会不会王动联系用户。不能生成对话回复。
+3. 如果你们之前有明确约定、承诺或正在等待某件事，也必须考虑这些因素
+4. 输出格式必须严格遵守以下二选一。
+
 ## 唤醒信息
 - 当前时间：${currentTime}
 - 距离用户最后一条消息：${diffMinutes} 分钟
 ${weatherContext ? `\n${weatherContext}\n` : ""}
+
+## 输出格式
+- 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。
+- 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（20字以内）。
+- 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
+- 禁止输出分析、推断、判断过程、规则说明、任务说明、历史总结或行为解释。
 `;
 }
 
@@ -493,7 +494,7 @@ ${historyText}`
     body: JSON.stringify({
       model: process.env.MODEL_NAME,
       messages: wakeMessages,
-      temperature: 0.8,
+      temperature: 0.4,
       top_p: 0.95,
       stream: false
     })
@@ -520,121 +521,78 @@ ${historyText}`
 
   let eventContent;
 
-   if (!aiText) {
+  if (!aiText) {
     console.log("\nAI 未返回推送内容，本次不发送推送\n");
     eventContent = diarySaved
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-
+  // 判断 AI 是否明确要静默
+  } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
+    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+    // AI 选择不发送推送
+    console.log("\nAI 选择不发送推送\n");
+    let reason = (noActionMatch[1] || "").trim();
+    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+      reason = reason.replace(/^原因[：:]\s*/, "").trim();
+    }
+    eventContent = reason
+      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
+      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
-    // 判断 AI 是否明确要静默
-    const noActionMatch = aiText.match(
-      /^\[NO_ACTION\](?:\s+(.{1,20}))?$/s
-    );
+    // 没有 [NO_ACTION] 就视为想发推送
+    console.log("\nAI 选择发送推送\n");
+    let barkText = aiText;
 
-    if (noActionMatch) {
-      let reason = (noActionMatch[1] || "").trim();
-
-      if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-        reason = reason.replace(/^原因[:：]\s*/, "").trim();
-      }
-
-      console.log(
-        "AI选择不发送推送，原因：",
-        reason || "未提供原因"
-      );
-
-      // 不把后台判断写入 Kelivo / Gateway
-      eventContent = "";
-
-    } else if (
-      /^\s*\[BARK\][\s\S]*\[\/BARK\]\s*$/.test(aiText)
-    ) {
-      console.log("\nAI 选择发送推送\n");
-
-      let barkText = aiText;
-
-      const barkMatch = barkText.match(
-        /^\s*\[BARK\]([\s\S]*?)\[\/BARK\]\s*$/
-      );
-
-      if (barkMatch) {
-        barkText = barkMatch[1].trim();
-      }
-
-      // 清洗“标题：”、“正文：”前缀（如果有）
-      barkText = barkText
-        .replace(/^标题[：:]\s*/gm, "")
-        .replace(/^正文[：:]\s*/gm, "");
-
-      // 按行处理
-      const lines = barkText
-        .split("\n")
-        .filter(line => line.trim() !== "");
-
-      let title, body;
-
-      if (lines.length === 0) {
-        console.log("\n推送内容清洗后为空，本次不发送推送\n");
-        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
-
-      } else if (lines.length === 1) {
-        title = "来自AI";
-        body = lines[0].trim();
-
-      } else if (lines.length === 2) {
-        title = lines[0].trim();
-        body = lines[1].trim();
-
-      } else {
-        // ≥3 行：第一行标题，剩余用空格拼接成正文
-        title = lines[0].trim();
-        body = lines.slice(1).map(l => l.trim()).join(" ");
-      }
-
-      if (!eventContent) {
-        // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示
-        const safeBody =
-          body.length > 500
-            ? body.substring(0, 497) + "..."
-            : body;
-
-        // 若标题为空或以数字开头，加个前缀
-        let safeTitle = title || "来自伴侣";
-        if (/^\d/.test(safeTitle)) {
-          safeTitle = "来自伴侣｜" + safeTitle;
-        }
-
-        const pushResult = await sendPushNotification({
-          title: safeTitle,
-          body: safeBody
-        });
-
-        if (!pushResult.ok) {
-          console.log(
-            `\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`
-          );
-
-          eventContent =
-            `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
-
-        } else {
-          eventContent =
-            `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
-        }
-      }
-
+    // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
+    const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
+    if (barkMatch) {
+      barkText = barkMatch[1].trim();
     } else {
-      // AI 输出不是合法的 NO_ACTION 或 BARK，直接拦截
-      console.log("\nAI输出格式异常，已拦截，不发送推送\n");
-console.log("AI原始输出长度:", aiText.length);
-console.log("AI原始输出内容:", JSON.stringify(aiText));
-eventContent = "";
+      barkText = barkText.replace(/^\[BARK\]\s*/, "").trim();
+      barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
+    }
+
+    // 清洗“标题：”、“正文：”前缀（如果有）
+    barkText = barkText
+      .replace(/^标题[：:]\s*/gm, "")
+      .replace(/^正文[：:]\s*/gm, "");
+
+    // 按行处理
+    const lines = barkText.split("\n").filter(line => line.trim() !== "");
+
+    let title, body;
+    if (lines.length === 0) {
+      console.log("\n推送内容清洗后为空，本次不发送推送\n");
+      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
+    } else if (lines.length === 1) {
+      title = "来自AI";
+      body = lines[0].trim();
+    } else if (lines.length === 2) {
+      title = lines[0].trim();
+      body = lines[1].trim();
+    } else {
+      // ≥3 行：第一行标题，剩余用空格拼接成正文
+      title = lines[0].trim();
+      body = lines.slice(1).map(l => l.trim()).join(" ");
+    }
+
+    if (!eventContent) {
+      // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
+      const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
+      // 若标题为空或以数字开头，加个前缀，可自行修改
+      let safeTitle = title || "来自伴侣";
+      if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
+
+      const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
+      if (!pushResult.ok) {
+        console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
+        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
+      } else {
+        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+      }
     }
   }
-    if (!eventContent) {
-  return;
-}
+
   try {
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
