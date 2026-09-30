@@ -511,6 +511,7 @@ function readRestartCommand() {
   return readEnvValue("RESTART_COMMAND") || DEFAULT_RESTART_COMMAND;
 }
 
+
 // ========================
 // 安全：管理页走 Basic Auth，/v1 按公开开关鉴权，内部写接口只允许同进程容器 localhost
 // ========================
