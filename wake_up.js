@@ -85,7 +85,21 @@ function appendDiaryEntry(content) {
   console.log(`已保存日记：${diaryFile}`);
   return true;
 }
+function loadTodayDiary() {
+  const diaryFile = path.join(
+    DIARY_DIR_PATH,
+    `${getDiaryDateString()}.md`
+  );
 
+  if (!fs.existsSync(diaryFile)) return "";
+
+  try {
+    return fs.readFileSync(diaryFile, "utf-8").trim();
+  } catch (err) {
+    console.log("读取今日日记失败，跳过日记记忆：", err.message);
+    return "";
+  }
+}
 // 批注 2026-07-11：推送层扩展为 Bark/ntfy；默认仍走 Bark，保护旧部署不改 .env 也能继续运行。
 async function sendPushNotification({ title, body }) {
   const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
@@ -449,11 +463,22 @@ async function runWakeUp() {
   const cleanSP = baseSystemPrompt 
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
+  
+const todayDiary = loadTodayDiary();
 
+const todayDiaryContext = todayDiary
+  ? `【今日日记】
+以下是你今天已经写下的日记，它是你自己之前留下的记录。
+如果你这次考虑写日记，请先参考这些内容。
+已经记录过的同一件事不要仅仅换一种说法重复记录；只有新的进展、变化、感受或值得补充的信息才写进新的日记。
+如果没有新的内容，就不要为了写日记而重复记录。
+
+${todayDiary}`
+  : "";
   const wakeMessages = [
     {
       role: "system",
-      content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
+      content: [wakePrompt, cleanSP, todayDiaryContext].filter(Boolean).join("\n\n")
     },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
