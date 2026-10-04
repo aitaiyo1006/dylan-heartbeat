@@ -749,10 +749,35 @@ app.post("/v1/chat/completions", async (req, reply) => {
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content } = req.body;
-    if (!content) return reply.code(400).send({ error: "content is required" });
+    const { content, wakeAction } = req.body;
+
+    if (!content) {
+      return reply.code(400).send({ error: "content is required" });
+    }
+
+    if (wakeAction === "NO_ACTION") {
+      console.log(
+        JSON.stringify({
+          event: "wake_no_action_received",
+          content
+        })
+      );
+
+      // NO_ACTION 只由 wake_up.js 保存到独立状态文件，
+      // 不写入 enhanced_messages.json，避免占用 49 条时间线空间。
+      return reply.send({
+        success: true,
+        recorded: false,
+        reason: "NO_ACTION not added to timeline"
+      });
+    }
+
     appendSpecialEvent(content);
-    reply.send({ success: true });
+
+    reply.send({
+      success: true,
+      recorded: true
+    });
   } catch (err) {
     console.error(err);
     reply.code(500).send({ error: err.message });
