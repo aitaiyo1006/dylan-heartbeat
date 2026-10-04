@@ -441,7 +441,9 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 - 禁止输出分析、推断、判断过程、规则说明、任务说明、历史总结或行为解释。
 `;
 }
-
+function stripPosition(messages) {
+  return messages.map(({ position, ...rest }) => rest);
+}
 async function runWakeUp() {
   console.log("\n==========================");
   console.log("开始自动唤醒");
