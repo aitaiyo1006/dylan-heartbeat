@@ -15,6 +15,7 @@ const {
 // 批注 2026-08-10：与 Gateway 共用同一 DATA_DIR；未配置时仍落回项目目录，保护旧 VPS/本机部署。
 const DATA_DIR = ensureDataDir();
 const TIMELINE_PATH = runtimeFile("enhanced_messages.json");
+const LAST_WAKE_DECISION_PATH = runtimeFile("last_wake_decision.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -368,8 +369,34 @@ function getLastUserTime(messages) {
   return null;
 }
 
-function stripPosition(messages) {
-  return messages.map(({ position, ...rest }) => rest);
+function saveLastWakeDecision(action, reason = "") {
+  try {
+    fs.writeFileSync(
+      LAST_WAKE_DECISION_PATH,
+      JSON.stringify(
+        {
+          time: getLocalTimeString(),
+          action,
+          reason
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch (err) {
+    console.log("保存上次自动唤醒结果失败:", err.message);
+  }
+}
+
+function loadLastWakeDecision() {
+  try {
+    if (!fs.existsSync(LAST_WAKE_DECISION_PATH)) return null;
+    return JSON.parse(fs.readFileSync(LAST_WAKE_DECISION_PATH, "utf8"));
+  } catch (err) {
+    console.log("读取上次自动唤醒结果失败:", err.message);
+    return null;
+  }
 }
 
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
@@ -460,6 +487,17 @@ async function runWakeUp() {
     .join("\n\n");
 
   const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
+  const lastWakeDecision = loadLastWakeDecision();
+
+const lastWakeContext = lastWakeDecision
+  ? `【上一次自动唤醒决定】
+时间：${lastWakeDecision.time}
+决定：${lastWakeDecision.action === "NO_ACTION" ? "暂不联系用户" : lastWakeDecision.action}
+原因：${lastWakeDecision.reason || "未记录"}
+
+这是上一次自动唤醒时的判断，仅供你参考。
+现在请结合最新聊天记录和当前情况重新判断，不要机械重复上一次决定。`
+  : "";
   const cleanSP = baseSystemPrompt 
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
@@ -474,10 +512,12 @@ const todayDiaryContext = todayDiary
 ${todayDiary}`
   : "";
   const wakeMessages = [
-    {
-      role: "system",
-      content: [wakePrompt, cleanSP, todayDiaryContext].filter(Boolean).join("\n\n")
-    },
+  {
+    role: "system",
+    content: [wakePrompt, cleanSP, wakeMemory, lastWakeContext]
+      .filter(Boolean)
+      .join("\n\n")
+  },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
       // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
@@ -551,16 +591,28 @@ ${historyText}`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
-    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    // AI 选择不发送推送
-    console.log("\nAI 选择不发送推送\n");
-    let reason = (noActionMatch[1] || "").trim();
-    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-      reason = reason.replace(/^原因[：:]\s*/, "").trim();
-    }
-    eventContent = reason
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+  const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+
+  let reason = (noActionMatch[1] || "").trim();
+
+  if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+    reason = reason.replace(/^原因[：:]\s*/, "").trim();
+  }
+
+  console.log("\nAI 选择不发送推送");
+  console.log(
+    JSON.stringify({
+      event: "wake_no_action",
+      reason: reason || "未提供原因",
+      time: getLocalTimeString()
+    })
+  );
+
+  saveLastWakeDecision("NO_ACTION", reason);
+
+  eventContent = reason
+    ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
+    : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
@@ -620,7 +672,12 @@ ${historyText}`
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: eventContent })
+      body: JSON.stringify({
+  content: eventContent,
+  wakeAction: aiText && /^\[NO_ACTION\]\s*(.{0,20})?/.test(aiText)
+    ? "NO_ACTION"
+    : "BARK"
+})
     });
     if (!eventResponse.ok) {
       throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
