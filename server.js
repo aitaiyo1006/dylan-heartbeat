@@ -568,25 +568,43 @@ app.post("/v1/chat/completions", async (req, reply) => {
       messages: summarizeMessagesForLog(body?.messages || [])
     }));
 
-    const kelivoMessages = body.messages || [];
-    const oldTimeline = loadTimeline();
+   const kelivoMessages = body.messages || [];
+const oldTimeline = loadTimeline();
 
-    const tsDB = loadTimestampDB();
-    let tsDBDirty = false;
-    for (const msg of kelivoMessages) {
-      if (msg.role === "system") continue;
-      if (msg.role === "tool") continue;
-      const ts = extractTimestamp(normalizeContentToText(msg.content));
-      if (!ts) continue;
-      const fp = makeFingerprint(msg);
-      const fpStripped = makeFingerprintStripped(msg);
-      if (!tsDB[fp]) { tsDB[fp] = ts.toISOString(); tsDBDirty = true; }
-      if (!tsDB[fpStripped]) { tsDB[fpStripped] = ts.toISOString(); tsDBDirty = true; }
-    }
-    if (tsDBDirty) saveTimestampDB(tsDB);
+const isWakeRequest = req.headers["x-dylan-wake"] === "1";
 
-    const finalTimeline = buildTimeline(kelivoMessages, tsDB);
-    saveTimeline(finalTimeline);
+const tsDB = loadTimestampDB();
+let tsDBDirty = false;
+
+for (const msg of kelivoMessages) {
+  if (msg.role === "system") continue;
+  if (msg.role === "tool") continue;
+
+  const ts = extractTimestamp(normalizeContentToText(msg.content));
+  if (!ts) continue;
+
+  const fp = makeFingerprint(msg);
+  const fpStripped = makeFingerprintStripped(msg);
+
+  if (!tsDB[fp]) {
+    tsDB[fp] = ts.toISOString();
+    tsDBDirty = true;
+  }
+
+  if (!tsDB[fpStripped]) {
+    tsDB[fpStripped] = ts.toISOString();
+    tsDBDirty = true;
+  }
+}
+
+if (tsDBDirty && !isWakeRequest) {
+  saveTimestampDB(tsDB);
+}
+
+if (!isWakeRequest) {
+  const finalTimeline = buildTimeline(kelivoMessages, tsDB);
+  saveTimeline(finalTimeline);
+}
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
     // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
