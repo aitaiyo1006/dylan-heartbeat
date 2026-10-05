@@ -337,6 +337,8 @@ function isRealMessageForTimeline(msg) {
 
   const contentText = normalizeContentToText(msg.content);
 
+  // 长期记忆只供正常聊天模型使用，不进入时间线，
+  // 不占用 enhanced_messages.json 的49条正常消息位置。
   if (
     msg.role === "user" &&
     contentText.includes("<user_memory")
@@ -344,7 +346,9 @@ function isRealMessageForTimeline(msg) {
     return false;
   }
 
-  if (msg.role === "user" && contentText.trim().startsWith("<system>")) return false;
+  if (msg.role === "user" && contentText.trim().startsWith("<system>")) {
+    return false;
+  }
 
   return msg.role === "user" || msg.role === "assistant";
 }
