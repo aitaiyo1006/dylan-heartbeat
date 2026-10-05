@@ -573,9 +573,10 @@ ${historyText}`
     // 五分钟默认总超时只作兜底，可由 WAKE_UPSTREAM_TIMEOUT_MS 调整。
     signal: AbortSignal.timeout(WAKE_UPSTREAM_TIMEOUT_MS),
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.TARGET_API_KEY}`
-    },
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${process.env.TARGET_API_KEY}`,
+  "X-Dylan-Wake": "1"
+},
     body: JSON.stringify({
       model: process.env.MODEL_NAME,
       messages: wakeMessages,
