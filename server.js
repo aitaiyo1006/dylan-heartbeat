@@ -653,19 +653,6 @@ if (tsDBDirty && !isWakeRequest) {
        if (mem) { saveWakeMemory(mem); break; }
      }
 
-     const memoryMessage = [...kelivoMessages]
-  .reverse()
-  .find(msg =>
-    msg.role === "user" &&
-    normalizeContentToText(msg.content).includes("<user_memory")
-  );
-
-if (memoryMessage) {
-  writeJsonAtomicSync(
-    runtimeFile("wake_memory.json"),
-    memoryMessage
-  );
-}
      const finalTimeline = buildTimeline(kelivoMessages, tsDB);
      saveTimeline(finalTimeline);
    }
