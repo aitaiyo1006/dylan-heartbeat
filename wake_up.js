@@ -521,12 +521,27 @@ const lastWakeContext = lastWakeDecision
   const cleanSP = baseSystemPrompt 
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
- const wakeMemory = (() => {
-  const stored = loadStoredWakeMemory();
-  if (stored) return `【长期记忆】\n${stored}`;
-  return "";
-})();
-const todayDiary = loadTodayDiary();
+    const wakeMemory = (() => {
+    const memoryMessage = [...cleanMessages]
+      .reverse()
+      .find(msg => {
+        const content = normalizeContentToText(msg.content);
+        return content.includes("<user_memory");
+      });
+
+    if (!memoryMessage) return "";
+
+    const content = normalizeContentToText(memoryMessage.content);
+
+    const match = content.match(
+      /<user_memory type="identity"[\s\S]*?<\/user_memory>/
+    );
+
+    if (!match) return "";
+
+    return `【长期记忆】\n${match[0]}`;
+  })();
+ const todayDiary = loadTodayDiary();
 
 const todayDiaryContext = todayDiary
   ? `【今日日记】
