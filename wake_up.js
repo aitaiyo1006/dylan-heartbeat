@@ -16,6 +16,7 @@ const {
 const DATA_DIR = ensureDataDir();
 const TIMELINE_PATH = runtimeFile("enhanced_messages.json");
 const LAST_WAKE_DECISION_PATH = runtimeFile("last_wake_decision.json");
+const WAKE_MEMORY_PATH = runtimeFile("wake_memory.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -399,6 +400,23 @@ function loadLastWakeDecision() {
   }
 }
 
+function clearLastWakeDecision() {
+  try {
+    if (fs.existsSync(LAST_WAKE_DECISION_PATH)) fs.unlinkSync(LAST_WAKE_DECISION_PATH);
+  } catch (err) {
+    console.log("清除上次自动唤醒结果失败:", err.message);
+  }
+}
+
+function loadStoredWakeMemory() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(WAKE_MEMORY_PATH, "utf8"));
+    return typeof parsed.content === "string" ? parsed.content.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   // 优先读取独立的提示词文件（推荐方式）
   const promptFile = path.join(__dirname, "wake_prompt.txt");
@@ -504,6 +522,9 @@ const lastWakeContext = lastWakeDecision
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
   const wakeMemory = (() => {
+      const stored = loadStoredWakeMemory();
+  if (stored) return `【长期记忆】\n${stored}`;
+    
   const memoryMessage = [...cleanMessages]
     .reverse()
     .find(msg => {
@@ -536,7 +557,7 @@ ${todayDiary}`
   const wakeMessages = [
   {
     role: "system",
-    content: [wakePrompt, cleanSP, wakeMemory, lastWakeContext]
+       content: [wakePrompt, cleanSP, wakeMemory, lastWakeContext, todayDiaryContext]
       .filter(Boolean)
       .join("\n\n")
   },
@@ -686,6 +707,7 @@ ${historyText}`
         console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
         eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
       } else {
+        clearLastWakeDecision();
         eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
       }
     }
