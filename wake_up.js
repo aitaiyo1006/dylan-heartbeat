@@ -521,35 +521,17 @@ const lastWakeContext = lastWakeDecision
   const cleanSP = baseSystemPrompt 
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
-  const wakeMemory = (() => {
-      const stored = loadStoredWakeMemory();
+ const wakeMemory = (() => {
+  const stored = loadStoredWakeMemory();
   if (stored) return `【长期记忆】\n${stored}`;
-    
-  const memoryMessage = [...cleanMessages]
-    .reverse()
-    .find(msg => {
-      const content = normalizeContentToText(msg.content);
-      return content.includes("<user_memory");
-    });
-
-  if (!memoryMessage) return "";
-
-  const content = normalizeContentToText(memoryMessage.content);
-
-  const match = content.match(
-    /<user_memory type="identity"[\s\S]*?<\/user_memory>/
-  );
-
-  if (!match) return "";
-
-  return `【长期记忆】\n${match[0]}`;
+  return "";
 })();
 const todayDiary = loadTodayDiary();
 
 const todayDiaryContext = todayDiary
   ? `【今日日记】
 以下是你今天已经写下的日记，只供你自己回顾。
-写新的日记时可以参考这些内容，不要重复记录已经发送且已经写过的事情。
+写新的日记时可以参考这些内容，不要重复记录已经发送、写过的事情。
 如果同一件事后来有了新的发展、感受、想法或情绪变化，可以继续写，但不要改变在聊天中或在日记里已经确定的事实。
 
 ${todayDiary}`
