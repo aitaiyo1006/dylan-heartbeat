@@ -46,7 +46,6 @@ const IS_RAILWAY_RUNTIME = Boolean(
 const DATA_DIR = ensureDataDir();
 const TIMELINE_FILE = runtimeFile("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = runtimeFile("message_timestamps.json");
-const WAKE_MEMORY_FILE = runtimeFile("wake_memory.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "pm2 restart gateway wake-up --update-env";
@@ -221,48 +220,13 @@ function loadTimeline() {
 // ========================
 // 保存 timeline（保留 SP）
 // ========================
-function extractIdentityMemory(text) {
-  const m = String(text || "").match(/<user_memory type="identity"[\s\S]*?<\/user_memory>/);
-  return m ? m[0] : "";
-}
-
-// 去掉 system prompt 里的记忆部分（和 wake_up.js 里 split("## Memories")[0] 口径一致）
-function stripMemoryFromText(text) {
-  return String(text || "")
-    .split("## Memories")[0]
-    .replace(/<user_memory[\s\S]*?<\/user_memory>/g, "")
-    .replace(/<memories>[\s\S]*?<\/memories>/g, "")
-    .trim();
-}
-
-function loadWakeMemory() {
-  try { return fs.readJsonSync(WAKE_MEMORY_FILE).content || ""; } catch { return ""; }
-}
-
-function saveWakeMemory(content) {
-  try {
-    if (!content || content === loadWakeMemory()) return;
-    writeJsonAtomicSync(WAKE_MEMORY_FILE, { updated_at: new Date().toISOString(), content });
-  } catch (err) {
-    console.error("保存长期记忆失败:", err.message);
-  }
-}
-
 function saveTimeline(messages) {
   const sp = messages.find(m => m.role === "system");
   const nonSP = messages.filter(m => m.role !== "system");
   const trimmed = nonSP.slice(-49);
-  let cleanSP = sp;
-  if (sp) {
-    const spText = normalizeContentToText(sp.content);
-    // 兼容旧数据：独立文件还不存在时，先把旧时间线里的记忆迁移一次，避免丢失
-    if (!fs.existsSync(WAKE_MEMORY_FILE)) saveWakeMemory(extractIdentityMemory(spText));
-    cleanSP = { ...sp, content: stripMemoryFromText(spText) };
-  }
-  const final = cleanSP ? [cleanSP, ...trimmed] : trimmed;
+  const final = sp ? [sp, ...trimmed] : trimmed;
   writeJsonAtomicSync(TIMELINE_FILE, final);
 }
-
 // ========================
 // 提取时间戳（支持多种格式）
 // ========================
@@ -651,13 +615,7 @@ if (tsDBDirty && !isWakeRequest) {
 }
 
    if (!isWakeRequest) {
-     // 长期记忆：取本次原始请求里最新的 identity 记忆，存到独立文件
-     for (let i = kelivoMessages.length - 1; i >= 0; i--) {
-       const mem = extractIdentityMemory(normalizeContentToText(kelivoMessages[i].content));
-       if (mem) { saveWakeMemory(mem); break; }
-     }
-
-     const finalTimeline = buildTimeline(kelivoMessages, tsDB);
+const finalTimeline = buildTimeline(kelivoMessages, tsDB);
      saveTimeline(finalTimeline);
    }
 
