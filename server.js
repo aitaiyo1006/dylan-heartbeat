@@ -334,8 +334,18 @@ function isRealMessageForTimeline(msg) {
   if (msg.role === "system") return false;
   if (msg.tool_calls) return false;
   if (isSpecialEvent(msg)) return false;
+
   const contentText = normalizeContentToText(msg.content);
+
+  if (
+    msg.role === "user" &&
+    contentText.includes("<user_memory")
+  ) {
+    return false;
+  }
+
   if (msg.role === "user" && contentText.trim().startsWith("<system>")) return false;
+
   return msg.role === "user" || msg.role === "assistant";
 }
 
@@ -643,6 +653,19 @@ if (tsDBDirty && !isWakeRequest) {
        if (mem) { saveWakeMemory(mem); break; }
      }
 
+     const memoryMessage = [...kelivoMessages]
+  .reverse()
+  .find(msg =>
+    msg.role === "user" &&
+    normalizeContentToText(msg.content).includes("<user_memory")
+  );
+
+if (memoryMessage) {
+  writeJsonAtomicSync(
+    runtimeFile("wake_memory.json"),
+    memoryMessage
+  );
+}
      const finalTimeline = buildTimeline(kelivoMessages, tsDB);
      saveTimeline(finalTimeline);
    }
