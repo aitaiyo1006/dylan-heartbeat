@@ -619,16 +619,40 @@ if (tsDBDirty && !isWakeRequest) {
 // 仅为 Timeline 使用副本，绝不改变 Kelivo 原始消息顺序
 const timelineMessages = [...kelivoMessages];
 
-for (let i = timelineMessages.length - 1; i >= 0; i--) {
-  const content = normalizeContentToText(timelineMessages[i].content);
+const memoryIndex = timelineMessages.findLastIndex(msg => {
+  if (msg.role !== "user") return false;
+  return normalizeContentToText(msg.content).includes("<user_memory");
+});
 
-  if (
-    timelineMessages[i].role === "user" &&
-    content.includes("<user_memory")
-  ) {
-    const [memoryMessage] = timelineMessages.splice(i, 1);
-    timelineMessages.push(memoryMessage);
-    break;
+if (memoryIndex !== -1) {
+  const realMessages = timelineMessages.filter(isRealMessageForTimeline);
+  const memoryMessage = timelineMessages[memoryIndex];
+
+  const memoryRealIndex = realMessages.findIndex(
+    msg => msg === memoryMessage
+  );
+
+  // 只有当长期记忆本来就在最后49条之外时，才调整它的位置。
+  // 调整后放在最后49条的最前面，不放到最后。
+  if (memoryRealIndex !== -1 && memoryRealIndex < realMessages.length - 49) {
+    timelineMessages.splice(memoryIndex, 1);
+
+    const targetRealIndex = Math.max(0, realMessages.length - 49);
+
+    let realCount = 0;
+    let insertIndex = timelineMessages.length;
+
+    for (let i = 0; i < timelineMessages.length; i++) {
+      if (isRealMessageForTimeline(timelineMessages[i])) {
+        if (realCount >= targetRealIndex) {
+          insertIndex = i;
+          break;
+        }
+        realCount++;
+      }
+    }
+
+    timelineMessages.splice(insertIndex, 0, memoryMessage);
   }
 }
 const hasUserMemory = kelivoMessages.some(msg => {
