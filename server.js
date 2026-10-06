@@ -616,25 +616,18 @@ if (tsDBDirty && !isWakeRequest) {
 
     // 保留 Kelivo 当前请求中的长期记忆，让它作为普通 user 消息进入 timeline。
 // 长期记忆和普通聊天一样，占用最近 49 条中的一个位置。
-for (let i = kelivoMessages.length - 1; i >= 0; i--) {
-  const content = normalizeContentToText(kelivoMessages[i].content);
+// 仅为 Timeline 使用副本，绝不改变 Kelivo 原始消息顺序
+const timelineMessages = [...kelivoMessages];
+
+for (let i = timelineMessages.length - 1; i >= 0; i--) {
+  const content = normalizeContentToText(timelineMessages[i].content);
 
   if (
-    kelivoMessages[i].role === "user" &&
+    timelineMessages[i].role === "user" &&
     content.includes("<user_memory")
   ) {
-   const exists = kelivoMessages.some(msg =>
-  msg.role === "user" &&
-  normalizeContentToText(msg.content).includes("<user_memory")
-);
-
-if (!exists) {
-      kelivoMessages.push({
-        role: "user",
-        content
-      });
-    }
-
+    const [memoryMessage] = timelineMessages.splice(i, 1);
+    timelineMessages.push(memoryMessage);
     break;
   }
 }
@@ -648,8 +641,8 @@ console.log(
   `[MEMORY_CHECK] user_memory=${hasUserMemory} user_messages=${kelivoMessages.filter(msg => msg.role === "user").length}`
 );
    if (!isWakeRequest) {
-const finalTimeline = buildTimeline(kelivoMessages, tsDB);
-     saveTimeline(finalTimeline);
+const finalTimeline = buildTimeline(timelineMessages, tsDB);
+saveTimeline(finalTimeline);
    }
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
