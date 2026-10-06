@@ -15,8 +15,6 @@ const {
 // 批注 2026-08-10：与 Gateway 共用同一 DATA_DIR；未配置时仍落回项目目录，保护旧 VPS/本机部署。
 const DATA_DIR = ensureDataDir();
 const TIMELINE_PATH = runtimeFile("enhanced_messages.json");
-const LAST_WAKE_DECISION_PATH = runtimeFile("last_wake_decision.json");
-const WAKE_MEMORY_PATH = runtimeFile("wake_memory.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -87,21 +85,7 @@ function appendDiaryEntry(content) {
   console.log(`已保存日记：${diaryFile}`);
   return true;
 }
-function loadTodayDiary() {
-  const diaryFile = path.join(
-    DIARY_DIR_PATH,
-    `${getDiaryDateString()}.md`
-  );
 
-  if (!fs.existsSync(diaryFile)) return "";
-
-  try {
-    return fs.readFileSync(diaryFile, "utf-8").trim();
-  } catch (err) {
-    console.log("读取今日日记失败，跳过日记记忆：", err.message);
-    return "";
-  }
-}
 // 批注 2026-07-11：推送层扩展为 Bark/ntfy；默认仍走 Bark，保护旧部署不改 .env 也能继续运行。
 async function sendPushNotification({ title, body }) {
   const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
@@ -370,51 +354,8 @@ function getLastUserTime(messages) {
   return null;
 }
 
-function saveLastWakeDecision(action, reason = "") {
-  try {
-    fs.writeFileSync(
-      LAST_WAKE_DECISION_PATH,
-      JSON.stringify(
-        {
-          time: getLocalTimeString(),
-          action,
-          reason
-        },
-        null,
-        2
-      ),
-      "utf8"
-    );
-  } catch (err) {
-    console.log("保存上次自动唤醒结果失败:", err.message);
-  }
-}
-
-function loadLastWakeDecision() {
-  try {
-    if (!fs.existsSync(LAST_WAKE_DECISION_PATH)) return null;
-    return JSON.parse(fs.readFileSync(LAST_WAKE_DECISION_PATH, "utf8"));
-  } catch (err) {
-    console.log("读取上次自动唤醒结果失败:", err.message);
-    return null;
-  }
-}
-
-function clearLastWakeDecision() {
-  try {
-    if (fs.existsSync(LAST_WAKE_DECISION_PATH)) fs.unlinkSync(LAST_WAKE_DECISION_PATH);
-  } catch (err) {
-    console.log("清除上次自动唤醒结果失败:", err.message);
-  }
-}
-
-function loadStoredWakeMemory() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(WAKE_MEMORY_PATH, "utf8"));
-    return typeof parsed.content === "string" ? parsed.content.trim() : "";
-  } catch {
-    return "";
-  }
+function stripPosition(messages) {
+  return messages.map(({ position, ...rest }) => rest);
 }
 
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
@@ -443,8 +384,8 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   return `
 ## 最高优先级规则
 1. 以下内容不是用户此刻发送给你的消息，这是一次后台自动唤醒，不是用户发起的对话。
-2. 根据己有的人设、关系、经历和最近发生的事情，判断此刻真实的自己会不会王动联系用户。不能生成对话回复。
-3. 如果你们之前有明确约定、承诺或正在等待某件事，也必须考虑这些因素
+2. 根据己有的人设、关系、经历和最近发生的事情，判断此刻真实的自己会不会主动联系用户。不能生成对话回复。
+3. 如果你们之前有明确约定、承诺或正在等待某件事，也必须考虑这些因素，考虑时依然需要参考当前人设与记忆，做出合适的判断。
 4. 输出格式必须严格遵守以下二选一。
 
 ## 唤醒信息
@@ -459,9 +400,7 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 - 禁止输出分析、推断、判断过程、规则说明、任务说明、历史总结或行为解释。
 `;
 }
-function stripPosition(messages) {
-  return messages.map(({ position, ...rest }) => rest);
-}
+
 async function runWakeUp() {
   console.log("\n==========================");
   console.log("开始自动唤醒");
@@ -507,38 +446,15 @@ async function runWakeUp() {
     .join("\n\n");
 
   const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-  const lastWakeDecision = loadLastWakeDecision();
-
-const lastWakeContext = lastWakeDecision
-  ? `【上一次自动唤醒决定】
-时间：${lastWakeDecision.time}
-决定：${lastWakeDecision.action === "NO_ACTION" ? "暂不联系用户" : lastWakeDecision.action}
-原因：${lastWakeDecision.reason || "未记录"}
-
-这是上一次自动唤醒时的判断，仅供你参考。
-现在请结合最新聊天记录和当前情况重新判断，不要机械重复上一次决定。`
-  : "";
   const cleanSP = baseSystemPrompt 
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
-    
- const todayDiary = loadTodayDiary();
 
-const todayDiaryContext = todayDiary
-  ? `【今日日记】
-以下是你今天已经写下的日记，只供你自己回顾。
-写新的日记时可以参考这些内容，不要重复记录已经发送、写过的事情。
-如果同一件事后来有了新的发展、感受、想法或情绪变化，可以继续写，但不要改变在聊天中或在日记里已经确定的事实。
-
-${todayDiary}`
-  : "";
   const wakeMessages = [
-  {
-    role: "system",
-       content: [wakePrompt, cleanSP, lastWakeContext, todayDiaryContext]
-      .filter(Boolean)
-      .join("\n\n")
-  },
+    {
+      role: "system",
+      content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
+    },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
       // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
@@ -572,14 +488,13 @@ ${historyText}`
     // 五分钟默认总超时只作兜底，可由 WAKE_UPSTREAM_TIMEOUT_MS 调整。
     signal: AbortSignal.timeout(WAKE_UPSTREAM_TIMEOUT_MS),
     headers: {
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${process.env.TARGET_API_KEY}`,
-  "X-Dylan-Wake": "1"
-},
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.TARGET_API_KEY}`
+    },
     body: JSON.stringify({
       model: process.env.MODEL_NAME,
       messages: wakeMessages,
-      temperature: 0.4,
+      temperature: 0.8,
       top_p: 0.95,
       stream: false
     })
@@ -613,28 +528,16 @@ ${historyText}`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
-  const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-
-  let reason = (noActionMatch[1] || "").trim();
-
-  if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-    reason = reason.replace(/^原因[：:]\s*/, "").trim();
-  }
-
-  console.log("\nAI 选择不发送推送");
-  console.log(
-    JSON.stringify({
-      event: "wake_no_action",
-      reason: reason || "未提供原因",
-      time: getLocalTimeString()
-    })
-  );
-
-  saveLastWakeDecision("NO_ACTION", reason);
-
-  eventContent = reason
-    ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
-    : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+    // AI 选择不发送推送
+    console.log("\nAI 选择不发送推送\n");
+    let reason = (noActionMatch[1] || "").trim();
+    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+      reason = reason.replace(/^原因[：:]\s*/, "").trim();
+    }
+    eventContent = reason
+      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
+      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
@@ -685,7 +588,6 @@ ${historyText}`
         console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
         eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
       } else {
-        clearLastWakeDecision();
         eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
       }
     }
@@ -695,12 +597,7 @@ ${historyText}`
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-  content: eventContent,
-  wakeAction: aiText && /^\[NO_ACTION\]\s*(.{0,20})?/.test(aiText)
-    ? "NO_ACTION"
-    : "BARK"
-})
+      body: JSON.stringify({ content: eventContent })
     });
     if (!eventResponse.ok) {
       throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
