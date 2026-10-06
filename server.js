@@ -638,6 +638,15 @@ for (let i = kelivoMessages.length - 1; i >= 0; i--) {
     break;
   }
 }
+const hasUserMemory = kelivoMessages.some(msg => {
+  if (msg.role !== "user") return false;
+  const content = normalizeContentToText(msg.content);
+  return content.includes("<user_memory");
+});
+
+console.log(
+  `[MEMORY_CHECK] user_memory=${hasUserMemory} user_messages=${kelivoMessages.filter(msg => msg.role === "user").length}`
+);
    if (!isWakeRequest) {
 const finalTimeline = buildTimeline(kelivoMessages, tsDB);
      saveTimeline(finalTimeline);
