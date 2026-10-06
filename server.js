@@ -227,6 +227,7 @@ function saveTimeline(messages) {
   const final = sp ? [sp, ...trimmed] : trimmed;
   writeJsonAtomicSync(TIMELINE_FILE, final);
 }
+
 // ========================
 // 提取时间戳（支持多种格式）
 // ========================
@@ -298,22 +299,8 @@ function isRealMessageForTimeline(msg) {
   if (msg.role === "system") return false;
   if (msg.tool_calls) return false;
   if (isSpecialEvent(msg)) return false;
-
   const contentText = normalizeContentToText(msg.content);
-
-  // 长期记忆只供正常聊天模型使用，不进入时间线，
-  // 不占用 enhanced_messages.json 的49条正常消息位置。
-  if (
-    msg.role === "user" &&
-    contentText.includes("<user_memory")
-  ) {
-    return false;
-  }
-
-  if (msg.role === "user" && contentText.trim().startsWith("<system>")) {
-    return false;
-  }
-
+  if (msg.role === "user" && contentText.trim().startsWith("<system>")) return false;
   return msg.role === "user" || msg.role === "assistant";
 }
 
@@ -524,7 +511,6 @@ function readRestartCommand() {
   return readEnvValue("RESTART_COMMAND") || DEFAULT_RESTART_COMMAND;
 }
 
-
 // ========================
 // 安全：管理页走 Basic Auth，/v1 按公开开关鉴权，内部写接口只允许同进程容器 localhost
 // ========================
@@ -581,104 +567,25 @@ app.post("/v1/chat/completions", async (req, reply) => {
       messages: summarizeMessagesForLog(body?.messages || [])
     }));
 
-   const kelivoMessages = body.messages || [];
-const oldTimeline = loadTimeline();
+    const kelivoMessages = body.messages || [];
+    const oldTimeline = loadTimeline();
 
-const isWakeRequest = req.headers["x-dylan-wake"] === "1";
+    const tsDB = loadTimestampDB();
+    let tsDBDirty = false;
+    for (const msg of kelivoMessages) {
+      if (msg.role === "system") continue;
+      if (msg.role === "tool") continue;
+      const ts = extractTimestamp(normalizeContentToText(msg.content));
+      if (!ts) continue;
+      const fp = makeFingerprint(msg);
+      const fpStripped = makeFingerprintStripped(msg);
+      if (!tsDB[fp]) { tsDB[fp] = ts.toISOString(); tsDBDirty = true; }
+      if (!tsDB[fpStripped]) { tsDB[fpStripped] = ts.toISOString(); tsDBDirty = true; }
+    }
+    if (tsDBDirty) saveTimestampDB(tsDB);
 
-const tsDB = loadTimestampDB();
-let tsDBDirty = false;
-
-for (const msg of kelivoMessages) {
-  if (msg.role === "system") continue;
-  if (msg.role === "tool") continue;
-
-  const ts = extractTimestamp(normalizeContentToText(msg.content));
-  if (!ts) continue;
-
-  const fp = makeFingerprint(msg);
-  const fpStripped = makeFingerprintStripped(msg);
-
-  if (!tsDB[fp]) {
-    tsDB[fp] = ts.toISOString();
-    tsDBDirty = true;
-  }
-
-  if (!tsDB[fpStripped]) {
-    tsDB[fpStripped] = ts.toISOString();
-    tsDBDirty = true;
-  }
-}
-
-if (tsDBDirty && !isWakeRequest) {
-  saveTimestampDB(tsDB);
-}
-
-   
-const hasUserMemory = kelivoMessages.some(msg => {
-  if (msg.role !== "user") return false;
-  const content = normalizeContentToText(msg.content);
-  return content.includes("<user_memory");
-});
-
-console.log(
-  `[MEMORY_CHECK] user_memory=${hasUserMemory} user_messages=${kelivoMessages.filter(msg => msg.role === "user").length}`
-);
-   if (!isWakeRequest) {
-  // 只为 Timeline 构建，不改变 Kelivo 原始消息顺序
-  const finalTimelineBuilt = buildTimeline([...kelivoMessages], tsDB);
-
-  const systemMessage = finalTimelineBuilt.find(
-    msg => msg.role === "system"
-  );
-
-  const nonSystemMessages = finalTimelineBuilt.filter(
-    msg => msg.role !== "system"
-  );
-
-  const memoryIndex = [...nonSystemMessages].findLastIndex(msg => {
-    if (msg.role !== "user") return false;
-    return normalizeContentToText(msg.content).includes("<user_memory");
-  });
-
-  let finalTimeline = finalTimelineBuilt;
-
-  // 如果长期记忆已经在最终49条里，不动它原来的位置。
-  // 如果已经被挤到49条之外，则只替换最旧的一条，
-  // 把长期记忆放到49条的最前面，而不是最后面。
-  if (
-    memoryIndex !== -1 &&
-    memoryIndex < nonSystemMessages.length - 49
-  ) {
-    const memoryMessage = {
-      ...nonSystemMessages[memoryIndex],
-      position: 1
-    };
-
-    const recent48 = nonSystemMessages
-      .slice(-48)
-      .map(msg => ({
-        ...msg,
-        position:
-          typeof msg.position === "number"
-            ? msg.position + 1
-            : msg.position
-      }));
-
-    finalTimeline = systemMessage
-      ? [
-          { ...systemMessage, position: 0 },
-          memoryMessage,
-          ...recent48
-        ]
-      : [
-          memoryMessage,
-          ...recent48
-        ];
-  }
-
-  saveTimeline(finalTimeline);
-}
+    const finalTimeline = buildTimeline(kelivoMessages, tsDB);
+    saveTimeline(finalTimeline);
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
     // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
@@ -841,35 +748,10 @@ console.log(
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content, wakeAction } = req.body;
-
-    if (!content) {
-      return reply.code(400).send({ error: "content is required" });
-    }
-
-    if (wakeAction === "NO_ACTION") {
-      console.log(
-        JSON.stringify({
-          event: "wake_no_action_received",
-          content
-        })
-      );
-
-      // NO_ACTION 只由 wake_up.js 保存到独立状态文件，
-      // 不写入 enhanced_messages.json，避免占用 49 条时间线空间。
-      return reply.send({
-        success: true,
-        recorded: false,
-        reason: "NO_ACTION not added to timeline"
-      });
-    }
-
+    const { content } = req.body;
+    if (!content) return reply.code(400).send({ error: "content is required" });
     appendSpecialEvent(content);
-
-    reply.send({
-      success: true,
-      recorded: true
-    });
+    reply.send({ success: true });
   } catch (err) {
     console.error(err);
     reply.code(500).send({ error: err.message });
