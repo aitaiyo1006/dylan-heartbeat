@@ -568,6 +568,29 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }));
 
     const kelivoMessages = body.messages || [];
+    const memoryProbe = kelivoMessages
+  .map((msg, index) => {
+    const content = normalizeContentToText(msg.content);
+    return {
+      index,
+      role: msg.role,
+      has_user_memory: /<user_memory(?:\s|>)/i.test(content),
+      has_user_memory_update: content.includes("<user_memory_update"),
+      has_user_profile: content.includes("<user_profile"),
+      content_chars: content.length
+    };
+  })
+  .filter(item =>
+    item.has_user_memory ||
+    item.has_user_memory_update ||
+    item.has_user_profile
+  );
+
+console.log(JSON.stringify({
+  event: "memory_probe",
+  found: memoryProbe.length > 0,
+  messages: memoryProbe
+}));
     const oldTimeline = loadTimeline();
 
     const tsDB = loadTimestampDB();
