@@ -574,6 +574,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     return {
       index,
       role: msg.role,
+      starts_with_system: content.trim().startsWith("<system>"),
       has_user_memory: /<user_memory(?:\s|>)/i.test(content),
       has_user_memory_update: content.includes("<user_memory_update"),
       has_user_profile: content.includes("<user_profile"),
