@@ -623,15 +623,12 @@ for (let i = kelivoMessages.length - 1; i >= 0; i--) {
     kelivoMessages[i].role === "user" &&
     content.includes("<user_memory")
   ) {
-    const existingIndex = kelivoMessages.findIndex(msg =>
-      msg.role === "user" &&
-      normalizeContentToText(msg.content).includes("<user_memory")
-    );
+   const exists = kelivoMessages.some(msg =>
+  msg.role === "user" &&
+  normalizeContentToText(msg.content).includes("<user_memory")
+);
 
-    if (existingIndex !== -1) {
-      const [memoryMessage] = kelivoMessages.splice(existingIndex, 1);
-      kelivoMessages.push(memoryMessage);
-    } else {
+if (!exists) {
       kelivoMessages.push({
         role: "user",
         content
