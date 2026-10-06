@@ -614,47 +614,7 @@ if (tsDBDirty && !isWakeRequest) {
   saveTimestampDB(tsDB);
 }
 
-    // 保留 Kelivo 当前请求中的长期记忆，让它作为普通 user 消息进入 timeline。
-// 长期记忆和普通聊天一样，占用最近 49 条中的一个位置。
-// 仅为 Timeline 使用副本，绝不改变 Kelivo 原始消息顺序
-const timelineMessages = [...kelivoMessages];
-
-const memoryIndex = timelineMessages.findLastIndex(msg => {
-  if (msg.role !== "user") return false;
-  return normalizeContentToText(msg.content).includes("<user_memory");
-});
-
-if (memoryIndex !== -1) {
-  const realMessages = timelineMessages.filter(isRealMessageForTimeline);
-  const memoryMessage = timelineMessages[memoryIndex];
-
-  const memoryRealIndex = realMessages.findIndex(
-    msg => msg === memoryMessage
-  );
-
-  // 只有当长期记忆本来就在最后49条之外时，才调整它的位置。
-  // 调整后放在最后49条的最前面，不放到最后。
-  if (memoryRealIndex !== -1 && memoryRealIndex < realMessages.length - 49) {
-    timelineMessages.splice(memoryIndex, 1);
-
-    const targetRealIndex = Math.max(0, realMessages.length - 49);
-
-    let realCount = 0;
-    let insertIndex = timelineMessages.length;
-
-    for (let i = 0; i < timelineMessages.length; i++) {
-      if (isRealMessageForTimeline(timelineMessages[i])) {
-        if (realCount >= targetRealIndex) {
-          insertIndex = i;
-          break;
-        }
-        realCount++;
-      }
-    }
-
-    timelineMessages.splice(insertIndex, 0, memoryMessage);
-  }
-}
+   
 const hasUserMemory = kelivoMessages.some(msg => {
   if (msg.role !== "user") return false;
   const content = normalizeContentToText(msg.content);
@@ -665,9 +625,60 @@ console.log(
   `[MEMORY_CHECK] user_memory=${hasUserMemory} user_messages=${kelivoMessages.filter(msg => msg.role === "user").length}`
 );
    if (!isWakeRequest) {
-const finalTimeline = buildTimeline(timelineMessages, tsDB);
-saveTimeline(finalTimeline);
-   }
+  // 只为 Timeline 构建，不改变 Kelivo 原始消息顺序
+  const finalTimelineBuilt = buildTimeline([...kelivoMessages], tsDB);
+
+  const systemMessage = finalTimelineBuilt.find(
+    msg => msg.role === "system"
+  );
+
+  const nonSystemMessages = finalTimelineBuilt.filter(
+    msg => msg.role !== "system"
+  );
+
+  const memoryIndex = [...nonSystemMessages].findLastIndex(msg => {
+    if (msg.role !== "user") return false;
+    return normalizeContentToText(msg.content).includes("<user_memory");
+  });
+
+  let finalTimeline = finalTimelineBuilt;
+
+  // 如果长期记忆已经在最终49条里，不动它原来的位置。
+  // 如果已经被挤到49条之外，则只替换最旧的一条，
+  // 把长期记忆放到49条的最前面，而不是最后面。
+  if (
+    memoryIndex !== -1 &&
+    memoryIndex < nonSystemMessages.length - 49
+  ) {
+    const memoryMessage = {
+      ...nonSystemMessages[memoryIndex],
+      position: 1
+    };
+
+    const recent48 = nonSystemMessages
+      .slice(-48)
+      .map(msg => ({
+        ...msg,
+        position:
+          typeof msg.position === "number"
+            ? msg.position + 1
+            : msg.position
+      }));
+
+    finalTimeline = systemMessage
+      ? [
+          { ...systemMessage, position: 0 },
+          memoryMessage,
+          ...recent48
+        ]
+      : [
+          memoryMessage,
+          ...recent48
+        ];
+  }
+
+  saveTimeline(finalTimeline);
+}
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
     // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
