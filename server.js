@@ -614,6 +614,30 @@ if (tsDBDirty && !isWakeRequest) {
   saveTimestampDB(tsDB);
 }
 
+    // 保留 Kelivo 当前请求中的长期记忆，让它作为普通 user 消息进入 timeline。
+// 长期记忆和普通聊天一样，占用最近 49 条中的一个位置。
+for (let i = kelivoMessages.length - 1; i >= 0; i--) {
+  const content = normalizeContentToText(kelivoMessages[i].content);
+
+  if (
+    kelivoMessages[i].role === "user" &&
+    content.includes("<user_memory")
+  ) {
+    const exists = kelivoMessages.some(msg =>
+      msg.role === "user" &&
+      normalizeContentToText(msg.content).includes("<user_memory")
+    );
+
+    if (!exists) {
+      kelivoMessages.push({
+        role: "user",
+        content
+      });
+    }
+
+    break;
+  }
+}
    if (!isWakeRequest) {
 const finalTimeline = buildTimeline(kelivoMessages, tsDB);
      saveTimeline(finalTimeline);
