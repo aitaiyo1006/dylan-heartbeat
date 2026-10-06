@@ -46,6 +46,7 @@ const IS_RAILWAY_RUNTIME = Boolean(
 const DATA_DIR = ensureDataDir();
 const TIMELINE_FILE = runtimeFile("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = runtimeFile("message_timestamps.json");
+const LAST_WAKE_DECISION_FILE = runtimeFile("last_wake_decision.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "pm2 restart gateway wake-up --update-env";
@@ -222,9 +223,53 @@ function loadTimeline() {
 // ========================
 function saveTimeline(messages) {
   const sp = messages.find(m => m.role === "system");
+
   const nonSP = messages.filter(m => m.role !== "system");
-  const trimmed = nonSP.slice(-49);
-  const final = sp ? [sp, ...trimmed] : trimmed;
+
+  // ========================
+  // 长期记忆独立保留，不占49条
+  // ========================
+
+  const incomingMemories =
+    nonSP.filter(isLongTermMemoryMessage);
+
+  const oldTimeline = loadTimeline();
+
+  const oldMemories =
+    oldTimeline.filter(isLongTermMemoryMessage);
+
+  const latestMemory =
+    incomingMemories.length > 0
+      ? incomingMemories[incomingMemories.length - 1]
+      : oldMemories.length > 0
+        ? oldMemories[oldMemories.length - 1]
+        : null;
+
+  // 长期记忆不参与49条裁剪
+  const normalMessages =
+    nonSP.filter(msg => !isLongTermMemoryMessage(msg));
+
+  const trimmed = normalMessages.slice(-49);
+
+  const final = [];
+
+  if (sp) {
+    final.push({
+      ...sp,
+      position: 0
+    });
+  }
+
+  // 长期记忆固定在 system 后面
+  if (latestMemory) {
+    final.push({
+      ...latestMemory,
+      position: 0.5
+    });
+  }
+
+  final.push(...trimmed);
+
   writeJsonAtomicSync(TIMELINE_FILE, final);
 }
 
@@ -295,6 +340,16 @@ function isSpecialEvent(msg) {
   return isSpecialEventContent(normalizeContentToText(msg.content));
 }
 
+function isLongTermMemoryMessage(msg) {
+  if (!msg || msg.role === "system") return false;
+
+  const content = normalizeContentToText(msg.content);
+
+  return (
+    /<user_memory\s+type=/i.test(content) &&
+    /<\/user_memory>/i.test(content)
+  );
+}
 function isRealMessageForTimeline(msg) {
   if (msg.role === "system") return false;
   if (msg.tool_calls) return false;
@@ -568,30 +623,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }));
 
     const kelivoMessages = body.messages || [];
-    const memoryProbe = kelivoMessages
-  .map((msg, index) => {
-    const content = normalizeContentToText(msg.content);
-    return {
-      index,
-      role: msg.role,
-      starts_with_system: content.trim().startsWith("<system>"),
-      has_user_memory: /<user_memory(?:\s|>)/i.test(content),
-      has_user_memory_update: content.includes("<user_memory_update"),
-      has_user_profile: content.includes("<user_profile"),
-      content_chars: content.length
-    };
-  })
-  .filter(item =>
-    item.has_user_memory ||
-    item.has_user_memory_update ||
-    item.has_user_profile
-  );
-
-console.log(JSON.stringify({
-  event: "memory_probe",
-  found: memoryProbe.length > 0,
-  messages: memoryProbe
-}));
     const oldTimeline = loadTimeline();
 
     const tsDB = loadTimestampDB();
@@ -772,13 +803,72 @@ console.log(JSON.stringify({
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content } = req.body;
-    if (!content) return reply.code(400).send({ error: "content is required" });
+    const {
+      content,
+      decision,
+      reason
+    } = req.body || {};
+
+    if (!content) {
+      return reply.code(400).send({
+        error: "content is required"
+      });
+    }
+
+    const decisionType =
+      String(decision || "").trim().toUpperCase();
+
+    const decisionReason =
+      String(reason || "").trim();
+
+    // ========================
+    // NO_ACTION
+    // ========================
+    // Gateway 会收到，但绝不进入 enhanced_messages.json
+    if (decisionType === "NO_ACTION") {
+      writeJsonAtomicSync(LAST_WAKE_DECISION_FILE, {
+        decision: "NO_ACTION",
+        reason: decisionReason,
+        content: String(content).trim(),
+        updated_at: new Date().toISOString()
+      });
+
+      console.log(
+        `自动唤醒 NO_ACTION：${
+          decisionReason || "未提供原因"
+        }`
+      );
+
+      return reply.send({
+        success: true,
+        timeline: false
+      });
+    }
+
+    // ========================
+    // 其他唤醒事件
+    // ========================
+    // 有新的非 NO_ACTION 结果时，清除上一轮拒绝原因
+    writeJsonAtomicSync(LAST_WAKE_DECISION_FILE, {
+      decision: decisionType || "OTHER",
+      reason: "",
+      content: "",
+      updated_at: new Date().toISOString()
+    });
+
+    // 正常推送事件继续进入 Timeline
     appendSpecialEvent(content);
-    reply.send({ success: true });
+
+    reply.send({
+      success: true,
+      timeline: true
+    });
+
   } catch (err) {
     console.error(err);
-    reply.code(500).send({ error: err.message });
+    reply.code(500).send({
+      error: err.message
+    });
   }
 });
 
