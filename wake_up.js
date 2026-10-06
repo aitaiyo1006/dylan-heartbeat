@@ -15,6 +15,8 @@ const {
 // 批注 2026-08-10：与 Gateway 共用同一 DATA_DIR；未配置时仍落回项目目录，保护旧 VPS/本机部署。
 const DATA_DIR = ensureDataDir();
 const TIMELINE_PATH = runtimeFile("enhanced_messages.json");
+const LAST_WAKE_DECISION_PATH =
+  runtimeFile("last_wake_decision.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -314,6 +316,51 @@ function loadTimelineMessages() {
   }
 }
 
+function loadLastWakeDecision() {
+  if (!fs.existsSync(LAST_WAKE_DECISION_PATH)) {
+    return "";
+  }
+
+  try {
+    const data = JSON.parse(
+      fs.readFileSync(
+        LAST_WAKE_DECISION_PATH,
+        "utf-8"
+      )
+    );
+
+    if (data?.decision !== "NO_ACTION") {
+      return "";
+    }
+
+    const reason = String(
+      data?.reason || ""
+    ).trim();
+
+    const content = String(
+      data?.content || ""
+    ).trim();
+
+    if (!reason && !content) {
+      return "";
+    }
+
+    return [
+      "【上一轮自动唤醒】",
+      "上一轮选择了不发送推送。",
+      reason ? `拒绝原因：${reason}` : "",
+      content ? `上一轮记录：${content}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } catch (err) {
+    console.log(
+      "读取 last_wake_decision.json 失败:",
+      err.message
+    );
+    return "";
+  }
+} 
 function getNow() {
   return new Date();
 }
@@ -450,10 +497,16 @@ async function runWakeUp() {
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
 
+  const previousWakeDecision =
+  loadLastWakeDecision();
   const wakeMessages = [
     {
       role: "system",
-      content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
+      content: [
+  wakePrompt,
+  cleanSP,
+  previousWakeDecision
+].filter(Boolean).join("\n\n")
     },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
@@ -520,7 +573,8 @@ ${historyText}`
   const aiText = diaryResult.remainingText;
 
   let eventContent;
-
+let wakeDecision = "OTHER";
+let wakeDecisionReason = "";
   if (!aiText) {
     console.log("\nAI 未返回推送内容，本次不发送推送\n");
     eventContent = diarySaved
@@ -535,6 +589,8 @@ ${historyText}`
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
       reason = reason.replace(/^原因[：:]\s*/, "").trim();
     }
+    wakeDecision = "NO_ACTION";
+    wakeDecisionReason = reason;
     eventContent = reason
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
@@ -588,6 +644,8 @@ ${historyText}`
         console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
         eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
       } else {
+         wakeDecision = "PUSH";
+         wakeDecisionReason = "";
         eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
       }
     }
@@ -597,7 +655,11 @@ ${historyText}`
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: eventContent })
+      body: JSON.stringify({
+  content: eventContent,
+  decision: wakeDecision,
+  reason: wakeDecisionReason
+})
     });
     if (!eventResponse.ok) {
       throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
