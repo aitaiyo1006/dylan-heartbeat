@@ -361,6 +361,44 @@ function loadLastWakeDecision() {
     return "";
   }
 } 
+function loadTodayDiary() {
+  try {
+    const diaryFile = path.join(
+      DIARY_DIR_PATH,
+      `${getDiaryDateString()}.md`
+    );
+
+    if (!fs.existsSync(diaryFile)) {
+      return "";
+    }
+
+    const content = fs.readFileSync(
+      diaryFile,
+      "utf-8"
+    ).trim();
+
+    if (!content) {
+      return "";
+    }
+
+    return [
+      "【今日日记】",
+      "以下是你今天已经写下的日记，只供你自己回顾。
+      "写新的日记时可以参考这些内容，不要重复记录已经发送、写过的事情。"
+      "如果同一件事后来有了新的发展、感受、想法或情绪变化，可以继续写，但不要改变在聊天中或在日记里已经确定的事实。",
+     
+      "",
+      content
+    ].join("\n");
+
+  } catch (err) {
+    console.log(
+      "读取今日日记失败:",
+      err.message
+    );
+    return "";
+  }
+}
 function getNow() {
   return new Date();
 }
@@ -499,15 +537,18 @@ async function runWakeUp() {
 
   const previousWakeDecision =
   loadLastWakeDecision();
+
+  const todayDiary = loadTodayDiary();
   const wakeMessages = [
-    {
-      role: "system",
-      content: [
-  wakePrompt,
-  cleanSP,
-  previousWakeDecision
-].filter(Boolean).join("\n\n")
-    },
+  {
+    role: "system",
+    content: [
+      wakePrompt,
+      cleanSP,
+      previousWakeDecision,
+      todayDiary
+    ].filter(Boolean).join("\n\n")
+  },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
       // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
