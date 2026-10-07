@@ -430,15 +430,15 @@ function getLastUserTime(messages) {
   let timelineLatest = null;
 
   const reversed = [...messages].reverse();
-
   for (const msg of reversed) {
     if (msg.role !== "user") continue;
 
     const content = normalizeContentToText(msg.content);
     const parsed = parseTimelineTimestamp(content);
 
-    if (parsed && (!timelineLatest || parsed > timelineLatest)) {
+    if (parsed) {
       timelineLatest = parsed;
+      break;
     }
   }
 
@@ -450,16 +450,18 @@ function getLastUserTime(messages) {
         fs.readFileSync(TIMESTAMP_DB_PATH, "utf-8")
       );
 
-      for (const [key, value] of Object.entries(data || {})) {
+      const entries = Object.entries(data || {});
+
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const [key, value] = entries[i];
+
         if (!String(key).startsWith("user:")) continue;
 
         const parsed = new Date(value);
 
-        if (
-          !Number.isNaN(parsed.getTime()) &&
-          (!timestampDbLatest || parsed > timestampDbLatest)
-        ) {
+        if (!Number.isNaN(parsed.getTime())) {
           timestampDbLatest = parsed;
+          break;
         }
       }
     } catch (err) {
