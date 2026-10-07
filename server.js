@@ -221,53 +221,54 @@ function loadTimeline() {
 // ========================
 // 保存 timeline（保留 SP）
 // ========================
+// 把"记忆 + 聊天正文"拼在一起的消息拆开：记忆部分归记忆，正文留给聊天记录
+function splitMemoryFromMessage(msg) {
+  const text = normalizeContentToText(msg.content);
+  const re = /<\/user_memory>|<user_memory\b[^>]*\/>/g;
+  let end = -1, m;
+  while ((m = re.exec(text)) !== null) end = m.index + m[0].length;
+  if (end < 0) return { memory: msg, rest: null };
+  const memoryText = text.slice(0, end).trim();
+  const restText = text.slice(end).trim();
+  return {
+    memory: { ...msg, content: memoryText },
+    rest: restText ? { ...msg, content: restText } : null
+  };
+}
+
 function saveTimeline(messages) {
   const sp = messages.find(m => m.role === "system");
-
   const nonSP = messages.filter(m => m.role !== "system");
 
-  // ========================
-  // 长期记忆独立保留，不占49条
-  // ========================
+  // 拆开"记忆 + 聊天正文"：记忆单独固定，正文留在原来的时间顺序里
+  const incomingMemories = [];
+  const normalMessages = [];
+  for (const msg of nonSP) {
+    if (isLongTermMemoryMessage(msg)) {
+      const { memory, rest } = splitMemoryFromMessage(msg);
+      incomingMemories.push(memory);
+      if (rest) normalMessages.push(rest);
+    } else {
+      normalMessages.push(msg);
+    }
+  }
 
-  const incomingMemories =
-    nonSP.filter(isLongTermMemoryMessage);
+  const oldMemories = loadTimeline().filter(isLongTermMemoryMessage);
 
-  const oldTimeline = loadTimeline();
-
-  const oldMemories =
-    oldTimeline.filter(isLongTermMemoryMessage);
-
+  // 本次请求没带记忆时，沿用上一次的；旧文件里的记忆也一并拆干净
   const latestMemory =
     incomingMemories.length > 0
       ? incomingMemories[incomingMemories.length - 1]
       : oldMemories.length > 0
-        ? oldMemories[oldMemories.length - 1]
+        ? splitMemoryFromMessage(oldMemories[oldMemories.length - 1]).memory
         : null;
 
-  // 长期记忆不参与49条裁剪
-  const normalMessages =
-    nonSP.filter(msg => !isLongTermMemoryMessage(msg));
-
+  // 长期记忆不参与 49 条裁剪
   const trimmed = normalMessages.slice(-49);
 
   const final = [];
-
-  if (sp) {
-    final.push({
-      ...sp,
-      position: 0
-    });
-  }
-
-  // 长期记忆固定在 system 后面
-  if (latestMemory) {
-    final.push({
-      ...latestMemory,
-      position: 0.5
-    });
-  }
-
+  if (sp) final.push({ ...sp, position: 0 });
+  if (latestMemory) final.push({ ...latestMemory, position: 0.5 });
   final.push(...trimmed);
 
   writeJsonAtomicSync(TIMELINE_FILE, final);
