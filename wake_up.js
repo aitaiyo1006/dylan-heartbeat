@@ -525,7 +525,8 @@ async function runWakeUp() {
       if (content.includes("## Memories")) {
         content = content.split("## Memories")[0];
       }
-      return `[${role}] ${content}`;
+       const label = content.includes("<user_memory") ? "系统提供的长期记忆" : role;
+   return `[${label}] ${content}`;
     })
     .join("\n\n");
 
