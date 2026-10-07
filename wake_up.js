@@ -15,8 +15,8 @@ const {
 // 批注 2026-08-10：与 Gateway 共用同一 DATA_DIR；未配置时仍落回项目目录，保护旧 VPS/本机部署。
 const DATA_DIR = ensureDataDir();
 const TIMELINE_PATH = runtimeFile("enhanced_messages.json");
-const LAST_WAKE_DECISION_PATH =
-  runtimeFile("last_wake_decision.json");
+const TIMESTAMP_DB_PATH = runtimeFile("message_timestamps.json");
+const LAST_WAKE_DECISION_PATH = runtimeFile("last_wake_decision.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -427,17 +427,56 @@ function parseTimelineTimestamp(value) {
 }
 
 function getLastUserTime(messages) {
+  let timelineLatest = null;
+
   const reversed = [...messages].reverse();
+
   for (const msg of reversed) {
-    if (msg.role === "user") {
-      const content = normalizeContentToText(msg.content);
-      // 批注 2026-07-15：兼容 Kelivo 时间前缀 "YYYY-MM-DDHH:mm"；
-      // 旧的 "YYYY-MM-DD HH:mm" 仍然可用，避免无空格时间导致 wake-up 误判没有用户时间。
-      const parsed = parseTimelineTimestamp(content);
-      if (parsed) return parsed;
+    if (msg.role !== "user") continue;
+
+    const content = normalizeContentToText(msg.content);
+    const parsed = parseTimelineTimestamp(content);
+
+    if (parsed && (!timelineLatest || parsed > timelineLatest)) {
+      timelineLatest = parsed;
     }
   }
-  return null;
+
+  let timestampDbLatest = null;
+
+  if (fs.existsSync(TIMESTAMP_DB_PATH)) {
+    try {
+      const data = JSON.parse(
+        fs.readFileSync(TIMESTAMP_DB_PATH, "utf-8")
+      );
+
+      for (const [key, value] of Object.entries(data || {})) {
+        if (!String(key).startsWith("user:")) continue;
+
+        const parsed = new Date(value);
+
+        if (
+          !Number.isNaN(parsed.getTime()) &&
+          (!timestampDbLatest || parsed > timestampDbLatest)
+        ) {
+          timestampDbLatest = parsed;
+        }
+      }
+    } catch (err) {
+      console.log(
+        "读取 message_timestamps.json 失败，继续使用 enhanced_messages.json：",
+        err.message
+      );
+    }
+  }
+
+  if (timelineLatest && timestampDbLatest) {
+    return timelineLatest > timestampDbLatest
+      ? timelineLatest
+      : timestampDbLatest;
+  }
+
+  return timelineLatest || timestampDbLatest;
 }
 
 function stripPosition(messages) {
