@@ -567,6 +567,11 @@ ${historyText}`
 
   // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
   // 默认日志只写摘要，避免公开部署时把完整上下文刷进 pm2 日志。
+    const allWakeText = wakeMessages.map(m => normalizeContentToText(m.content)).join("\n");
+  console.log(JSON.stringify({
+    event: "wake_memory_check",
+    identity_blocks: (allWakeText.match(/<user_memory type="identity"/g) || []).length
+  }));
   console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
   console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
 
