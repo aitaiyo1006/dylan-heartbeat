@@ -581,7 +581,7 @@ async function runWakeUp() {
   const previousWakeDecision =
   loadLastWakeDecision();
 
-  const todayDiary = loadTodayDiary();
+  const todayDiary = readBooleanEnv("WAKE_DIARY_CONTEXT", true) ? loadTodayDiary() : "";
   const wakeMessages = [
   {
     role: "system",
