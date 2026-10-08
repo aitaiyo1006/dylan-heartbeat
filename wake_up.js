@@ -679,11 +679,7 @@ let wakeDecisionReason = "";
     wakeDecision = "NO_ACTION";
     wakeDecisionReason = reason;
 
-    console.log(
-      reason
-        ? `\nAI 选择不发送推送｜原因：${reason}\n`
-        : "\nAI 选择不发送推送\n"
-    );
+   console.log("\nAI 选择不发送推送\n");
 
     eventContent = reason
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
