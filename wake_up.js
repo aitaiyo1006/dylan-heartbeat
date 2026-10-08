@@ -667,14 +667,24 @@ let wakeDecisionReason = "";
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
-    } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
+   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    // AI 选择不发送推送
-    console.log("\nAI 选择不发送推送\n");
+
     let reason = (noActionMatch[1] || "").trim();
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
       reason = reason.replace(/^原因[：:]\s*/, "").trim();
     }
+
+    // AI 选择不发送推送
+    wakeDecision = "NO_ACTION";
+    wakeDecisionReason = reason;
+
+    console.log(
+      reason
+        ? `\nAI 选择不发送推送｜原因：${reason}\n`
+        : "\nAI 选择不发送推送\n"
+    );
+
     eventContent = reason
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
