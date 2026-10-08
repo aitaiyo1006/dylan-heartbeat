@@ -578,19 +578,16 @@ async function runWakeUp() {
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
 
-  const previousWakeDecision =
-  loadLastWakeDecision();
-
+ 
   const todayDiary = readBooleanEnv("WAKE_DIARY_CONTEXT", true) ? loadTodayDiary() : "";
   const wakeMessages = [
   {
     role: "system",
     content: [
-      wakePrompt,
-      cleanSP,
-      previousWakeDecision,
-      todayDiary
-    ].filter(Boolean).join("\n\n")
+  wakePrompt,
+  cleanSP,
+  todayDiary
+].filter(Boolean).join("\n\n")
   },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
