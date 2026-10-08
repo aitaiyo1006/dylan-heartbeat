@@ -670,23 +670,17 @@ let wakeDecisionReason = "";
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
-   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
+    } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-
+    // AI 选择不发送推送
+    console.log("\nAI 选择不发送推送\n");
     let reason = (noActionMatch[1] || "").trim();
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
       reason = reason.replace(/^原因[：:]\s*/, "").trim();
     }
-
-    // Railway 日志保留 NO_ACTION 原因，但原因不再写入 Gateway / enhanced_messages
-    console.log(
-      reason
-        ? `\nAI 选择不发送推送｜原因：${reason}\n`
-        : "\nAI 选择不发送推送\n"
-    );
-
-    // 只记录“本次没有推送”，不记录 AI 的具体拒绝理由
-    eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+    eventContent = reason
+      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
+      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
