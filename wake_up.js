@@ -58,13 +58,36 @@ function getDiaryTimeString(date = new Date()) {
 }
 
 // 批注 2026-07-11：日记只接受模型显式输出的 [DIARY] 块，避免把普通推送内容误写进本地日记。
+
 function extractDiaryFromResponse(text) {
   const diaryBlocks = [];
-  const remainingText = String(text || "").replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, (_, content) => {
-    const diary = String(content || "").trim();
-    if (diary) diaryBlocks.push(diary);
-    return "";
-  }).trim();
+
+  // 第一遍：正常提取成对的日记标签
+  let remainingText = String(text || "")
+    .replace(/\[\s*DIARY\s*\]([\s\S]*?)\[\s*\/\s*DIARY\s*\]/gi, (_, content) => {
+      const diary = String(content || "").trim();
+      if (diary) diaryBlocks.push(diary);
+      return "";
+    })
+    .trim();
+
+  // 第二遍：兜底处理模型漏写结束标签的情况
+  // 一旦出现没有配对的 [DIARY]，后续内容都归入日记，不进入推送
+  const openIndex = remainingText.search(/\[\s*DIARY\s*\]/i);
+
+  if (openIndex >= 0) {
+    const unmatchedDiary = remainingText
+      .slice(openIndex)
+      .replace(/^\[\s*DIARY\s*\]/i, "")
+      .trim();
+
+    if (unmatchedDiary) {
+      diaryBlocks.push(unmatchedDiary);
+    }
+
+    remainingText = remainingText.slice(0, openIndex).trim();
+  }
+
   return {
     diaryContent: diaryBlocks.join("\n\n").trim(),
     remainingText
