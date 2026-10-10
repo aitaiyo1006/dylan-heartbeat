@@ -58,35 +58,36 @@ function getDiaryTimeString(date = new Date()) {
 }
 
 // 批注 2026-07-11：日记只接受模型显式输出的 [DIARY] 块，避免把普通推送内容误写进本地日记。
-
 function extractDiaryFromResponse(text) {
   const diaryBlocks = [];
+  const OPEN = "\\[\\s*DIARY\\s*\\]";
+  const CLOSE = "\\[\\s*\\/\\s*DIARY\\s*\\]";
 
   // 第一遍：正常提取成对的日记标签
   let remainingText = String(text || "")
-    .replace(/\[\s*DIARY\s*\]([\s\S]*?)\[\s*\/\s*DIARY\s*\]/gi, (_, content) => {
+    .replace(new RegExp(`${OPEN}([\\s\\S]*?)${CLOSE}`, "gi"), (_, content) => {
       const diary = String(content || "").trim();
       if (diary) diaryBlocks.push(diary);
       return "";
     })
     .trim();
 
-  // 第二遍：兜底处理模型漏写结束标签的情况
+  // 第二遍：兜底处理漏写结束标签的情况
   // 一旦出现没有配对的 [DIARY]，后续内容都归入日记，不进入推送
-  const openIndex = remainingText.search(/\[\s*DIARY\s*\]/i);
-
+  const openIndex = remainingText.search(new RegExp(OPEN, "i"));
   if (openIndex >= 0) {
     const unmatchedDiary = remainingText
       .slice(openIndex)
-      .replace(/^\[\s*DIARY\s*\]/i, "")
+      .replace(new RegExp(`^${OPEN}`, "i"), "")
       .trim();
 
-    if (unmatchedDiary) {
-      diaryBlocks.push(unmatchedDiary);
-    }
-
+    if (unmatchedDiary) diaryBlocks.push(unmatchedDiary);
     remainingText = remainingText.slice(0, openIndex).trim();
+    console.log("检测到未闭合的 [DIARY]，其后内容已全部归入日记，不进入推送");
   }
+
+  // 第三遍：清掉孤立的 [/DIARY]，避免残留进推送
+  remainingText = remainingText.replace(new RegExp(CLOSE, "gi"), "").trim();
 
   return {
     diaryContent: diaryBlocks.join("\n\n").trim(),
@@ -354,15 +355,16 @@ function loadLastWakeDecision() {
       return "";
     }
 
-    const reason = String(data?.reason || "").trim();
+       const reason = String(data?.reason || "").trim();
 
-    if (!reason) {
-      return "";
-    }
+    const updatedAt = new Date(data?.updated_at);
+    const timeNote = Number.isNaN(updatedAt.getTime())
+      ? ""
+      : `（${formatDateTimeInTimeZone(updatedAt, TIME_ZONE)}，约 ${Math.max(0, Math.floor((Date.now() - updatedAt.getTime()) / 60000))} 分钟前）`;
 
     return [
       "【上一轮后台唤醒记录｜仅供参考】",
-      `上一轮没有发送推送，原因是：${reason}`,
+      `上一轮没有发送推送${timeNote}，${reason ? `原因是：${reason}` : "未说明原因"}。`,
       "这是你上一轮的判断结果，不是必须遵守的规则，不必沿用。请结合最近聊天、当前情况重新判断。"
     ].join("\n");
   } catch (err) {
