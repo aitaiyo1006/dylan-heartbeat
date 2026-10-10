@@ -339,6 +339,7 @@ function loadTimelineMessages() {
   }
 }
 
+
 function loadLastWakeDecision() {
   if (!fs.existsSync(LAST_WAKE_DECISION_PATH)) {
     return "";
@@ -346,37 +347,24 @@ function loadLastWakeDecision() {
 
   try {
     const data = JSON.parse(
-      fs.readFileSync(
-        LAST_WAKE_DECISION_PATH,
-        "utf-8"
-      )
+      fs.readFileSync(LAST_WAKE_DECISION_PATH, "utf-8")
     );
 
     if (data?.decision !== "NO_ACTION") {
       return "";
     }
 
-    const reason = String(
-      data?.reason || ""
-    ).trim();
+    const reason = String(data?.reason || "").trim();
 
-    const content = String(
-      data?.content || ""
-    ).trim();
-
-    if (!reason && !content) {
+    if (!reason) {
       return "";
     }
 
     return [
-      "【上一轮自动唤醒】",
-      "上一轮选择了不发送推送。",
-      reason ? `拒绝原因：${reason}` : "",
-      content ? `上一轮记录：${content}` : "",
-      "这只是上一轮的判断，请结合现在的情况重新判断，不必沿用。"
-    ]
-      .filter(Boolean)
-      .join("\n");
+      "【上一轮后台唤醒记录｜仅供参考】",
+      `上一轮没有发送推送，原因是：${reason}`,
+      "这是你上一轮的判断结果，不是必须遵守的规则，不必沿用。请结合最近聊天、当前情况重新判断。"
+    ].join("\n");
   } catch (err) {
     console.log(
       "读取 last_wake_decision.json 失败:",
@@ -384,7 +372,7 @@ function loadLastWakeDecision() {
     );
     return "";
   }
-} 
+}
 function loadTodayDiary() {
   try {
     const diaryFile = path.join(
@@ -603,6 +591,7 @@ async function runWakeUp() {
 
  
   const todayDiary = readBooleanEnv("WAKE_DIARY_CONTEXT", true) ? loadTodayDiary() : "";
+  const previousWakeDecision = loadLastWakeDecision();
   const wakeMessages = [
   {
     role: "system",
@@ -625,7 +614,9 @@ async function runWakeUp() {
 
 最近记录：
 
-${historyText}`
+${historyText}
+
+${previousWakeDecision}`
     }
   ];
 
